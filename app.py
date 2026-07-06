@@ -87,7 +87,7 @@ with col1:
     st.plotly_chart(fig, use_container_width=True, height=700)
 
 with col2:
-    st.subheader("📊 탐지 요약")
+    st.subheader("탐지 요약")
     normal_count = len(df[df['Status'] == 'Normal (정상)'])
     anomaly_count = len(df[df['Status'] == 'Anomaly (이상/차단대상)'])
     
@@ -95,6 +95,5 @@ with col2:
     st.metric(label="탐지된 이상 패턴", value=f"{anomaly_count} 건", delta="- Fail-Safe 작동", delta_color="inverse")
     
     st.write("---")
-    st.write("**⚠️ 이상 탐지 데이터 (Top 10)**")
-    # 보여줄 때는 원래 피처(Feature)들만 깔끔하게 출력
-    st.dataframe(df[df['Status'] == 'Anomaly (이상/차단대상)'][feature_names].head(10))
+    st.write("**⚠️ 이상 탐지 데이터 (Top 5)**")
+    st.dataframe(df[df['Status'] == 'Anomaly (이상/차단대상)'][feature_names].head(5))
