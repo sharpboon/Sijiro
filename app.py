@@ -232,7 +232,7 @@ with 우측_화면:
     
     안전_수 = len(df[df['상태'] == '🔵 안전 (정상 패턴)'])
     주의_수 = len(df[df['상태'] == '🟡 주의 (관찰 요망)'])
-    with 위험_수 = len(df[df['상태'] == '🔴 위험 (차단 대상)'])
+    위험_수 = len(df[df['상태'] == '🔴 위험 (차단 대상)'])
     
     st.metric(label="전체 모니터링 대상", value=f"{len(df)} 명")
     st.metric(label="🔴 위험 행동 감지", value=f"{위험_수} 건")
