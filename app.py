@@ -277,4 +277,3 @@ with 우측_화면:
         hide_index=True
     )
 
-```
