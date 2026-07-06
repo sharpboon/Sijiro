@@ -253,7 +253,7 @@ with 우측_화면:
         with st.container(border=True):
             st.markdown(f"### 👤 {선택된_유저} 프로필")
             st.markdown(f"**현재 상태:** {유저_데이터['상태']}")
-            st.markdown(f"**위험도 점수:** {유저_데이터['위험도 점수']}점")
+            st.markdown(f"**위험도 점수 :** `{유저_데이터['위험도 점수']}`점")
             
             if 유저_데이터['상태'] != '🔵 안전 (정상 패턴)':
                 st.markdown(f"⚠️ **주요 특이 원인:** <span style='color:#FF5722; font-weight:bold;'>{유저_데이터['주요원인_특성']}</span>", unsafe_allow_html=True)
