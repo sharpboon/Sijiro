@@ -20,14 +20,10 @@ SCENARIO_DEFAULTS = {
 # ==========================================
 # 세션 상태(Session State) 초기화
 # ==========================================
-if 'random_seed' not in st.session_state:
-    st.session_state.random_seed = 42
-if 'current_scenario' not in st.session_state:
-    st.session_state.current_scenario = "1. 평범한 평일 (기본)"
-
-# 🎯 [핵심 수정] 검색창과 그래프 클릭을 완벽하게 동기화할 전용 세션 키 생성
-if 'selected_user_id' not in st.session_state:
-    st.session_state.selected_user_id = "선택 안 함"
+if 'random_seed' not in st.session_state: st.session_state.random_seed = 42
+if 'current_scenario' not in st.session_state: st.session_state.current_scenario = "1. 평범한 평일 (기본)"
+if 'selected_user_id' not in st.session_state: st.session_state.selected_user_id = "선택 안 함"
+if 'last_data_settings' not in st.session_state: st.session_state.last_data_settings = {}
 
 for key, val in SCENARIO_DEFAULTS[st.session_state.current_scenario].items():
     if f"cfg_{key}" not in st.session_state:
@@ -80,22 +76,45 @@ st.sidebar.markdown("---")
 주의_비율 = st.sidebar.slider("🟡 주의(관찰) 판정 비율", min_value=5, max_value=30, value=10, step=1, format="%d%%")
 
 # ==========================================
-# 데이터 생성 및 위험도 평가 로직
+# 🔥 렉 방지 핵심: 데이터 생성 및 PCA 3D 변환 캐싱 제어
 # ==========================================
-np.random.seed(st.session_state.random_seed)
-시나리오_원래값 = SCENARIO_DEFAULTS[시나리오]
-진짜_기본_기준점 = [시나리오_원래값['체류시간'], 시나리오_원래값['클릭수'], 시나리오_원래값['결제액'], 시나리오_원래값['에러수'], 시나리오_원래값['스크롤깊이']]
+현재_데이터_설정 = {
+    "seed": st.session_state.random_seed,
+    "scenario": st.session_state.current_scenario,
+    "normal_cnt": 정상_샘플수,
+    "anomaly_cnt": 이상_샘플수
+}
 
-정상_시그마 = np.array([10, 2, 20, 0.5, 10])
-정상_데이터 = np.random.normal(loc=진짜_기본_기준점, scale=정상_시그마, size=(정상_샘플수, 5))
-이상_데이터 = np.random.uniform(low=[10, 50, 0, 10, 10], high=[100, 200, 500, 50, 100], size=(이상_샘플수, 5))
+# 설정이 바뀐 경우에만 무거운 PCA 연산 수행, 단순 클릭 시에는 기존 연산 재활용
+if st.session_state.last_data_settings != 현재_데이터_설정 or 'cached_df' not in st.session_state:
+    np.random.seed(st.session_state.random_seed)
+    시나리오_원래값 = SCENARIO_DEFAULTS[시나리오]
+    진짜_기본_기준점 = [시나리오_원래값['체류시간'], 시나리오_원래값['클릭수'], 시나리오_원래값['결제액'], 시나리오_원래값['에러수'], 시나리오_원래값['스크롤깊이']]
 
-전체_데이터 = np.vstack([정상_데이터, 이상_데이터])
+    정상_시그마 = np.array([10, 2, 20, 0.5, 10])
+    정상_데이터 = np.random.normal(loc=진짜_기본_기준점, scale=정상_시그마, size=(정상_샘플수, 5))
+    이상_데이터 = np.random.uniform(low=[10, 50, 0, 10, 10], high=[100, 200, 500, 50, 100], size=(이상_샘플수, 5))
+
+    전체_데이터 = np.vstack([정상_데이터, 이상_데이터])
+    기본_특성 = ['체류시간', '클릭수', '결제액', '에러수', '스크롤깊이']
+    base_df = pd.DataFrame(전체_데이터, columns=기본_특성)
+    base_df[기본_특성] = base_df[기본_특성].clip(lower=0) 
+    base_df.insert(0, '유저 번호', [f"USR-{i+1:04d}" for i in range(len(base_df))])
+
+    # 3D 차원 축소 연산 딱 한 번만 수행
+    pca = PCA(n_components=3)
+    잠재공간 = pca.fit_transform(base_df[기본_특성])
+    base_df['잠재축 X'], base_df['잠재축 Y'], base_df['잠재축 Z'] = 잠재공간[:, 0], 잠재공간[:, 1], 잠재공간[:, 2]
+    
+    st.session_state.cached_df = base_df
+    st.session_state.last_data_settings = 현재_데이터_설정
+
+# 캐싱된 데이터 복사 후 가벼운 등급 판정만 실시간 계산
+df = st.session_state.cached_df.copy()
 기본_특성 = ['체류시간', '클릭수', '결제액', '에러수', '스크롤깊이']
-df = pd.DataFrame(전체_데이터, columns=기본_특성)
-df[기본_특성] = df[기본_특성].clip(lower=0) 
-df.insert(0, '유저 번호', [f"USR-{i+1:04d}" for i in range(len(df))])
+정상_시그마 = np.array([10, 2, 20, 0.5, 10])
 
+# 위험도 및 등급 평가
 설정_기준점 = np.array([정상_체류, 정상_클릭, 정상_결제, 정상_에러, 정상_스크롤])
 z_scores = np.abs((df[기본_특성].values - 설정_기준점) / 정상_시그마)
 df['위험도 점수'] = np.round(np.clip((np.max(z_scores, axis=1) / 5.5) * 100, 0, 100), 1)
@@ -109,7 +128,7 @@ def classify_status(row):
     else: return '🔵 안전 (정상 패턴)'
 
 df['상태'] = df.apply(classify_status, axis=1)
-df['마커크기'] = df['상태'].map({'🔵 안전 (정상 패턴)': 5, '🟡 주의 (관찰 요망)': 10, '🔴 위험 (차단 대상)': 18})
+df['마커크기'] = df['상태'].map({'🔵 안전 (정상 패턴)': 4, '🟡 주의 (관찰 요망)': 10, '🔴 위험 (차단 대상)': 20})
 
 설정_시리즈 = pd.Series(설정_기준점, index=기본_특성)
 df['주요원인_특성'] = np.abs((df[기본_특성] - 설정_시리즈) / 정상_시그마).idxmax(axis=1)
@@ -125,19 +144,12 @@ def format_hover_text(row, col, 기준값):
 for 특성, 기준 in zip(기본_특성, 설정_기준점):
     df[f'{특성}_표시'] = df.apply(lambda row: format_hover_text(row, 특성, 기준), axis=1)
 
-pca = PCA(n_components=3)
-잠재공간 = pca.fit_transform(df[기본_특성])
-df['잠재축 X'], df['잠재축 Y'], df['잠재축 Z'] = 잠재공간[:, 0], 잠재공간[:, 1], 잠재공간[:, 2]
-
 # ==========================================
-# 화면 분할 및 그래프 시각화
+# 화면 분할 및 3D 그래프 시각화
 # ==========================================
 좌측_화면, 우측_화면 = st.columns([3, 1.2]) 
 
 with 좌측_화면:
-    st.markdown("⚠️ **안내:** 유저 점을 클릭하여 프로필을 보시려면 반드시 **[2D 평면 뷰]**를 선택해주세요. (3D는 클릭 불가)")
-    뷰_모드 = st.radio("모드 선택", ["🌐 3D 뷰 (전체 분포 확인)", "🗺️ 2D 평면 뷰 (클릭하여 유저 프로필 연동)"], horizontal=True, label_visibility="collapsed")
-    
     호버_템플릿 = (
         "<b>[%{customdata[0]}] %{customdata[1]}</b><br>"
         "위험도 점수: %{customdata[2]} / 100 점<br>"
@@ -150,53 +162,51 @@ with 좌측_화면:
         "<extra></extra>"
     )
     
-    선택_결과 = None
+    # 3D 산점도 정의
+    fig = px.scatter_3d(
+        df, x='잠재축 X', y='잠재축 Y', z='잠재축 Z', color='상태',
+        color_discrete_map={'🔵 안전 (정상 패턴)': 'rgba(30, 136, 229, 0.2)', '🟡 주의 (관찰 요망)': 'rgba(255, 193, 7, 0.8)', '🔴 위험 (차단 대상)': 'rgba(255, 30, 30, 1.0)'},
+        size='마커크기', size_max=20,
+        custom_data=['유저 번호', '상태', '위험도 점수', '체류시간_표시', '클릭수_표시', '결제액_표시', '에러수_표시', '스크롤깊이_표시'],
+        template='plotly_dark'
+    )
+    fig.update_traces(hovertemplate=호버_템플릿)
+    fig.update_layout(
+        clickmode='event+select',  # 🎯 3D 클릭 이벤트를 캡처하기 위한 속성 주입
+        hoverlabel=dict(bgcolor="white", font_size=13, font_color="black"), 
+        margin=dict(l=0, r=0, b=0, t=0), 
+        legend=dict(yanchor="top", y=0.99, xanchor="left", x=0.01),
+        scene=dict(
+            xaxis=dict(showbackground=False, gridcolor='#333333', title='활동성 (X)'),
+            yaxis=dict(showbackground=False, gridcolor='#333333', title='결제/에러 (Y)'),
+            zaxis=dict(showbackground=False, gridcolor='#333333', title='변동성 (Z)')
+        )
+    )
     
-    if "2D" in 뷰_모드:
-        fig = px.scatter(
-            df, x='잠재축 X', y='잠재축 Y', color='상태',
-            color_discrete_map={'🔵 안전 (정상 패턴)': 'rgba(30, 136, 229, 0.4)', '🟡 주의 (관찰 요망)': 'rgba(255, 193, 7, 0.9)', '🔴 위험 (차단 대상)': 'rgba(255, 30, 30, 1.0)'},
-            size='마커크기', size_max=18,
-            custom_data=['유저 번호', '상태', '위험도 점수', '체류시간_표시', '클릭수_표시', '결제액_표시', '에러수_표시', '스크롤깊이_표시'],
-            template='plotly_dark'
-        )
-        fig.update_traces(hovertemplate=호버_템플릿)
-        fig.update_layout(hoverlabel=dict(bgcolor="white", font_size=13, font_color="black"), margin=dict(l=0, r=0, b=0, t=30), legend=dict(yanchor="top", y=0.99, xanchor="left", x=0.01))
-        
-        # 2D 클릭 이벤트 리스너 활성화
-        선택_결과 = st.plotly_chart(fig, use_container_width=True, height=650, on_select="rerun")
-    else:
-        fig = px.scatter_3d(
-            df, x='잠재축 X', y='잠재축 Y', z='잠재축 Z', color='상태',
-            color_discrete_map={'🔵 안전 (정상 패턴)': 'rgba(30, 136, 229, 0.15)', '🟡 주의 (관찰 요망)': 'rgba(255, 193, 7, 0.8)', '🔴 위험 (차단 대상)': 'rgba(255, 30, 30, 1.0)'},
-            size='마커크기', size_max=15,
-            custom_data=['유저 번호', '상태', '위험도 점수', '체류시간_표시', '클릭수_표시', '결제액_표시', '에러수_표시', '스크롤깊이_표시'],
-            template='plotly_dark'
-        )
-        fig.update_traces(hovertemplate=호버_템플릿)
-        fig.update_layout(hoverlabel=dict(bgcolor="white", font_size=13, font_color="black"), margin=dict(l=0, r=0, b=0, t=0), legend=dict(yanchor="top", y=0.99, xanchor="left", x=0.01))
-        st.plotly_chart(fig, use_container_width=True, height=650)
+    # 3D 그래프 상호작용 활성화
+    선택_결과 = st.plotly_chart(fig, use_container_width=True, height=720, on_select="rerun")
 
 # ==========================================
-# 🎯 [핵심 수정] 2D 그래프 클릭 이벤트 -> 우측 정보창 즉시 동기화 로직
+# 🎯 3D 그래프 클릭 데이터 실시간 연동 처리
 # ==========================================
 if 선택_결과 and "selection" in 선택_결과:
     포인트들 = 선택_결과["selection"].get("points", [])
     if 포인트들:
         클릭된_유저_아이디 = 포인트들[0]["customdata"][0]
-        # 클릭한 유저가 기존 세션 값과 다르면 갱신 후 즉시 새로고침(rerun)
         if st.session_state.selected_user_id != 클릭된_유저_아이디:
             st.session_state.selected_user_id = 클릭된_유저_아이디
             st.rerun()
 
 유저_옵션_리스트 = ["선택 안 함"] + list(df['유저 번호'].values)
 
+# ==========================================
+# 우측 화면: 상세 프로필 및 통계
+# ==========================================
 with 우측_화면:
     st.subheader("🔍 개별 유저 상세 정보")
     
-    # 세션 키(key)를 묶어주어 그래프를 클릭할 때마다 이 selectbox가 자동으로 바뀜
     선택된_유저 = st.selectbox(
-        "2D 뷰에서 점을 클릭하거나 직접 검색하세요 👆",
+        "3D 그래프에서 유저 점을 클릭해 보세요 👆",
         options=유저_옵션_리스트,
         key="selected_user_id"
     )
