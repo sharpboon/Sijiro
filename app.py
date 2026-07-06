@@ -92,7 +92,7 @@ with 우측_화면:
     
     st.metric(label="전체 모니터링 대상", value=f"{정상_샘플수 + 이상_샘플수} 명")
     이상_수 = len(df[df['상태'] == '이상 패턴 (차단 대상)'])
-    st.metric(label="위험 행동 감지", value=f"{이상_수} 건", delta="- 시스템 작동중", delta_color="inverse")
+    st.metric(label="위험 행동 감지", value=f"{이상_수} 건", delta_color="inverse")
     
     st.write("---")
     st.write("**⚠️ 실시간 이상 유저 목록**")
