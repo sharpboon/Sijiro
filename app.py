@@ -26,7 +26,7 @@ if 'random_seed' not in st.session_state:
 if 'current_scenario' not in st.session_state:
     st.session_state.current_scenario = "1. 평범한 평일 (기본)"
 
-# 최초 실행 시 슬라이더용 세션 상태 세팅
+# 최초 실행 시 입력창용 세션 상태 세팅
 for key, val in SCENARIO_DEFAULTS[st.session_state.current_scenario].items():
     if f"cfg_{key}" not in st.session_state:
         st.session_state[f"cfg_{key}"] = val
@@ -53,18 +53,19 @@ if 시나리오 != st.session_state.current_scenario:
     st.rerun()
 
 st.sidebar.markdown("---")
-st.sidebar.markdown("### 🛠️ 정상치 기준값(평균) 수동 조절")
+st.sidebar.markdown("### ✍️ 정상치 기준값(평균) 직접 입력")
 
 if st.sidebar.button("↩️ 현재 시나리오 기본값으로 초기화", use_container_width=True):
     for key, val in SCENARIO_DEFAULTS[시나리오].items():
         st.session_state[f"cfg_{key}"] = val
     st.rerun()
 
-정상_체류 = st.sidebar.slider("정상 체류시간 평균", 0, 200, key="cfg_체류시간")
-정상_클릭 = st.sidebar.slider("정상 클릭수 평균", 0, 100, key="cfg_클릭수")
-정상_결제 = st.sidebar.slider("정상 결제액 평균", 0, 1000, key="cfg_결제액")
-정상_에러 = st.sidebar.slider("정상 에러수 평균", 0, 50, key="cfg_에러수")
-정상_스크롤 = st.sidebar.slider("정상 스크롤깊이 평균", 0, 300, key="cfg_스크롤깊이")
+# [기능 개선] 슬라이더를 제거하고 직접 입력하는 number_input으로 전면 수정
+정상_체류 = st.sidebar.number_input("정상 체류시간 평균", min_value=0, max_value=10000, step=1, key="cfg_체류시간")
+정상_클릭 = st.sidebar.number_input("정상 클릭수 평균", min_value=0, max_value=5000, step=1, key="cfg_클릭수")
+정상_결제 = st.sidebar.number_input("정상 결제액 평균", min_value=0, max_value=100000, step=10, key="cfg_결제액")
+정상_에러 = st.sidebar.number_input("정상 에러수 평균", min_value=0, max_value=1000, step=1, key="cfg_에러수")
+정상_스크롤 = st.sidebar.number_input("정상 스크롤깊이 평균", min_value=0, max_value=10000, step=1, key="cfg_스크롤깊이")
 
 st.sidebar.markdown("---")
 st.sidebar.markdown("### 📊 모니터링 데이터 규모")
@@ -84,7 +85,6 @@ np.random.seed(st.session_state.random_seed)
 시나리오_원래값 = SCENARIO_DEFAULTS[시나리오]
 진짜_기본_기준점 = [시나리오_원래값['체류시간'], 시나리오_원래값['클릭수'], 시나리오_원래값['결제액'], 시나리오_원래값['에러수'], 시나리오_원래값['스크롤깊이']]
 
-# 기본 생성 표준편차 모델 정의
 정상_시그마 = np.array([10, 2, 20, 0.5, 10])
 정상_데이터 = np.random.normal(loc=진짜_기본_기준점, scale=정상_시그마, size=(정상_샘플수, 5))
 이상_데이터 = np.random.uniform(low=[10, 50, 0, 10, 10], high=[100, 200, 500, 50, 100], size=(이상_샘플수, 5))
@@ -97,22 +97,18 @@ df[기본_특성] = df[기본_특성].clip(lower=0)
 df.insert(0, '유저 번호', [f"USR-{i+1:04d}" for i in range(len(df))])
 
 # ==========================================
-# [버그 수정] 절대적 Z-Score 기반 위험도 점수 산정 (최대 100점 제한)
+# 절대적 Z-Score 기반 위험도 점수 산정 (최대 100점 제한)
 # ==========================================
 설정_기준점 = np.array([정상_체류, 정상_클릭, 정상_결제, 정상_에러, 정상_스크롤])
 
-# 각 지표별로 관리자 기준선에서 얼마나 시그마 단위를 벗어났는지 연산
 z_scores = np.abs((df[기본_특성].values - 설정_기준점) / 정상_시그마)
-최대_이탈도 = np.max(z_scores, axis=1) # 5개 지표 중 가장 심각하게 튄 놈 기준
+최대_이탈도 = np.max(z_scores, axis=1) 
 
-# 5.5 시그마 이상 벗어나면 무조건 100점이 되도록 매핑 및 클리핑 안전장치
 df['위험도 점수'] = np.round(np.clip((최대_이탈도 / 5.5) * 100, 0, 100), 1)
 
-# 상대평가용 랭킹 문턱값 계산
 위험_문턱 = df['위험도 점수'].quantile(1.0 - (위험_비율 / 100.0))
 주의_문턱 = df['위험도 점수'].quantile(1.0 - ((위험_비율 + 주의_비율) / 100.0))
 
-# [버그 수정] 상대적 비율 안에 들거나, '절대적 위험 점수'를 넘으면 무조건 강제 격상!
 def classify_status(row):
     if row['위험도 점수'] >= 위험_문턱 or row['위험도 점수'] >= 80.0:
         return '🔴 위험 (차단 대상)'
