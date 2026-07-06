@@ -6,75 +6,76 @@ from sklearn.decomposition import PCA
 import plotly.express as px
 
 # 웹페이지 기본 설정
-st.set_page_config(page_title="Fail-Safe 3D Dashboard", layout="wide")
+st.set_page_config(page_title="이상 패턴 탐지 대시보드", layout="wide")
 
-st.title("Fail-Safe 탐지기")
+st.title("이상 패턴 탐지 시스템")
+st.markdown("정상 패턴(파란색) | 이상 패턴(빨간색) , 각 축은 압축된 잠재공간의 주요 특성을 의미")
 
 # ==========================================
 # 사이드바 (UI 컨트롤러)
 # ==========================================
-st.sidebar.header("⚙️ 파라미터 조절")
+st.sidebar.header("⚙️ 시스템 설정")
 
-n_normal = st.sidebar.slider("정상 유저 샘플 수", 100, 2000, 800, 100)
-n_abnormal = st.sidebar.slider("이상 유저 샘플 수", 10, 500, 50, 10)
-contamination = st.sidebar.slider("이상 탐지 민감도 (Contamination)", 0.01, 0.20, 0.06, 0.01)
+정상_샘플수 = st.sidebar.slider("정상 유저 데이터 수", 100, 2000, 800, 100)
+이상_샘플수 = st.sidebar.slider("이상 유저 데이터 수", 10, 500, 50, 10)
+탐지_민감도 = st.sidebar.slider("이상 탐지 민감도", 0.01, 0.20, 0.06, 0.01)
 
 # ==========================================
 # 데이터 생성 및 모델링
 # ==========================================
 np.random.seed(42)
 
-normal_users = np.random.normal(loc=[50, 10, 100, 1, 80], scale=[10, 2, 20, 0.5, 10], size=(n_normal, 5))
-abnormal_users = np.random.uniform(low=[10, 50, 0, 10, 10], high=[100, 200, 500, 50, 100], size=(n_abnormal, 5))
+# 가상 데이터 생성
+정상_데이터 = np.random.normal(loc=[50, 10, 100, 1, 80], scale=[10, 2, 20, 0.5, 10], size=(정상_샘플수, 5))
+이상_데이터 = np.random.uniform(low=[10, 50, 0, 10, 10], high=[100, 200, 500, 50, 100], size=(이상_샘플수, 5))
 
-X_data = np.vstack([normal_users, abnormal_users])
-feature_names = ['체류시간', '클릭수', '결제액', '에러수', '스크롤']
-df = pd.DataFrame(X_data, columns=feature_names)
+전체_데이터 = np.vstack([정상_데이터, 이상_데이터])
+기본_특성 = ['체류시간', '클릭수', '결제액', '에러수', '스크롤깊이']
+df = pd.DataFrame(전체_데이터, columns=기본_특성)
 
-# Isolation Forest를 이용한 이상 탐지
-iso_forest = IsolationForest(n_estimators=100, contamination=contamination, random_state=42)
-df['Anomaly_Score'] = iso_forest.fit_predict(df[feature_names])
-df['Status'] = df['Anomaly_Score'].map({1: '정상', -1: '이상'})
+# 이상 탐지 모델 구동
+모델 = IsolationForest(n_estimators=100, contamination=탐지_민감도, random_state=42)
+df['탐지결과'] = 모델.fit_predict(df[기본_특성])
+df['상태'] = df['탐지결과'].map({1: '정상 패턴', -1: '이상 패턴 (차단 대상)'})
 
-# 가독성을 위한 마커 크기 세팅
-df['Marker_Size'] = df['Status'].map({'정상': 3, '이상': 12})
+# 마커 크기 세팅
+df['마커크기'] = df['상태'].map({'정상 패턴': 3, '이상 패턴 (차단 대상)': 12})
 
 # ==========================================
-# 3. PCA 3차원 차원 축소 및 직관적 네이밍
+# 차원 축소 및 한국어 축 정의
 # ==========================================
 pca = PCA(n_components=3)
-latent_3d = pca.fit_transform(df[feature_names])
+잠재공간 = pca.fit_transform(df[기본_특성])
 
-# X, Y, Z 대신 실무적으로 이해하기 쉬운 잠재공간 이름 부여
-df['잠재축 X (주요 활동성)'] = latent_3d[:, 0]
-df['잠재축 Y (결제/에러 패턴)'] = latent_3d[:, 1]
-df['잠재축 Z (행동 변동성)'] = latent_3d[:, 2]
+df['사용자 활동성'] = 잠재공간[:, 0]
+df['결제 및 에러 패턴'] = 잠재공간[:, 1]
+df['행동 변동성'] = 잠재공간[:, 2]
 
 # ==========================================
-# 대시보드 메인 화면 3D 시각화
+# 메인 화면 시각화
 # ==========================================
-col1, col2 = st.columns([3, 1])
+좌측_화면, 우측_화면 = st.columns([3, 1])
 
-with col1:
-    # Plotly 3D 산점도
+with 좌측_화면:
+    # 3D 산점도 그래프 정의
     fig = px.scatter_3d(
         df, 
-        x='주요 활동성', 
-        y='결제/에러 패턴', 
+        x='사용자 활동성', 
+        y='결제 및 에러 패턴', 
         z='행동 변동성', 
-        color='Status',
-        # 정상 유저: 눈에 잘 띄는 파란색(Blue) 반투명 처리 / 이상 유저: 강렬한 빨간색(Red) 불투명
+        color='상태',
+        # 정상: 선명한 파란색(25% 투명) / 이상: 강렬한 빨간색(100% 불투명)
         color_discrete_map={
-            '정상': 'rgba(30, 136, 229, 0.3)', 
-            '이상': 'rgba(255, 50, 50, 1.0)'
+            '정상 패턴': 'rgba(10, 100, 240, 0.25)', 
+            '이상 패턴 (차단 대상)': 'rgba(255, 30, 30, 1.0)'
         },
-        size='Marker_Size',
+        size='마커크기',
         size_max=12,
-        hover_data=feature_names, # 원본 데이터(체류시간 등)도 마우스 올리면 보이게 유지
+        hover_data=기본_특성,
         template='plotly_dark'
     )
     
-    # 3D 축 배경 지우기 및 라인 세팅
+    # 그래프 스타일 조정
     fig.update_layout(
         scene=dict(
             xaxis=dict(showbackground=False, gridcolor='gray'),
@@ -86,14 +87,13 @@ with col1:
     )
     st.plotly_chart(fig, use_container_width=True, height=700)
 
-with col2:
-    st.subheader("탐지 요약")
-    normal_count = len(df[df['Status'] == '정상'])
-    anomaly_count = len(df[df['Status'] == '이상'])
+with 우측_화면:
+    st.subheader("탐지 통계")
     
-    st.metric(label="총 모니터링 유저", value=f"{n_normal + n_abnormal} 명")
-    st.metric(label="탐지된 이상 패턴", value=f"{anomaly_count} 건", delta="- Fail-Safe 작동", delta_color="inverse")
+    st.metric(label="전체 모니터링 대상", value=f"{정상_샘플수 + 이상_샘플수} 명")
+    이상_수 = len(df[df['상태'] == '이상 패턴 (차단 대상)'])
+    st.metric(label="위험 행동 감지", value=f"{이상_수} 건", delta="- 시스템 작동중", delta_color="inverse")
     
     st.write("---")
-    st.write("**⚠️ 이상 탐지 데이터 (Top 5)**")
-    st.dataframe(df[df['Status'] == 'Anomaly (이상/차단대상)'][feature_names].head(5))
+    st.write("**⚠️ 실시간 이상 유저 목록**")
+    st.dataframe(df[df['상태'] == '이상 패턴 (차단 대상)'][기본_특성].head(5))
