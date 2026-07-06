@@ -28,16 +28,16 @@ normal_users = np.random.normal(loc=[50, 10, 100, 1, 80], scale=[10, 2, 20, 0.5,
 abnormal_users = np.random.uniform(low=[10, 50, 0, 10, 10], high=[100, 200, 500, 50, 100], size=(n_abnormal, 5))
 
 X_data = np.vstack([normal_users, abnormal_users])
-feature_names = ['Duration(체류시간)', 'Clicks(클릭수)', 'Amount(결제액)', 'Errors(에러수)', 'Scroll_Depth(스크롤)']
+feature_names = ['체류시간', '클릭수', '결제액', '에러수', '스크롤']
 df = pd.DataFrame(X_data, columns=feature_names)
 
 # Isolation Forest를 이용한 이상 탐지
 iso_forest = IsolationForest(n_estimators=100, contamination=contamination, random_state=42)
 df['Anomaly_Score'] = iso_forest.fit_predict(df[feature_names])
-df['Status'] = df['Anomaly_Score'].map({1: 'Normal (정상)', -1: 'Anomaly (이상/차단대상)'})
+df['Status'] = df['Anomaly_Score'].map({1: '정상', -1: '이상'})
 
 # 가독성을 위한 마커 크기 세팅
-df['Marker_Size'] = df['Status'].map({'Normal (정상)': 3, 'Anomaly (이상/차단대상)': 12})
+df['Marker_Size'] = df['Status'].map({'정상': 3, '이상': 12})
 
 # ==========================================
 # 3. PCA 3차원 차원 축소 및 직관적 네이밍
@@ -59,14 +59,14 @@ with col1:
     # Plotly 3D 산점도
     fig = px.scatter_3d(
         df, 
-        x='잠재축 X (주요 활동성)', 
-        y='잠재축 Y (결제/에러 패턴)', 
-        z='잠재축 Z (행동 변동성)', 
+        x='주요 활동성', 
+        y='결제/에러 패턴', 
+        z='행동 변동성', 
         color='Status',
         # 정상 유저: 눈에 잘 띄는 파란색(Blue) 반투명 처리 / 이상 유저: 강렬한 빨간색(Red) 불투명
         color_discrete_map={
-            'Normal (정상)': 'rgba(30, 136, 229, 0.3)', 
-            'Anomaly (이상/차단대상)': 'rgba(255, 50, 50, 1.0)'
+            '정상': 'rgba(30, 136, 229, 0.3)', 
+            '이상': 'rgba(255, 50, 50, 1.0)'
         },
         size='Marker_Size',
         size_max=12,
@@ -88,8 +88,8 @@ with col1:
 
 with col2:
     st.subheader("탐지 요약")
-    normal_count = len(df[df['Status'] == 'Normal (정상)'])
-    anomaly_count = len(df[df['Status'] == 'Anomaly (이상/차단대상)'])
+    normal_count = len(df[df['Status'] == '정상'])
+    anomaly_count = len(df[df['Status'] == '이상'])
     
     st.metric(label="총 모니터링 유저", value=f"{n_normal + n_abnormal} 명")
     st.metric(label="탐지된 이상 패턴", value=f"{anomaly_count} 건", delta="- Fail-Safe 작동", delta_color="inverse")
