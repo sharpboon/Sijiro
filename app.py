@@ -18,6 +18,16 @@ SCENARIO_DEFAULTS = {
 }
 
 # ==========================================
+# [버그 수정] 위젯 세션 상태를 안전하게 변경하기 위한 콜백 함수 정의
+# ==========================================
+def 세션_기준값_업데이트(유저_행_데이터):
+    st.session_state["cfg_체류시간"] = int(round(유저_행_데이터["체류시간"]))
+    st.session_state["cfg_클릭수"] = int(round(유저_행_데이터["클릭수"]))
+    st.session_state["cfg_결제액"] = int(round(유저_행_데이터["결제액"]))
+    st.session_state["cfg_에러수"] = int(round(유저_행_데이터["에러수"]))
+    st.session_state["cfg_스크롤깊이"] = int(round(유저_행_데이터["스크롤깊이"]))
+
+# ==========================================
 # 세션 상태(Session State) 초기화 로직
 # ==========================================
 if 'random_seed' not in st.session_state:
@@ -60,7 +70,7 @@ if st.sidebar.button("↩️ 현재 시나리오 기본값으로 초기화", use
         st.session_state[f"cfg_{key}"] = val
     st.rerun()
 
-# 입력창 (우측 검색창에서 버튼 누르면 이 값들이 동적으로 변합니다)
+# 입력창
 정상_체류 = st.sidebar.number_input("정상 체류시간 평균", min_value=0, max_value=10000, step=1, key="cfg_체류시간")
 정상_클릭 = st.sidebar.number_input("정상 클릭수 평균", min_value=0, max_value=5000, step=1, key="cfg_클릭수")
 정상_결제 = st.sidebar.number_input("정상 결제액 평균", min_value=0, max_value=100000, step=10, key="cfg_결제액")
@@ -253,14 +263,13 @@ with 우측_화면:
             if 유저_데이터['상태'] != '🔵 안전 (정상 패턴)':
                 st.markdown(f"⚠️ **주요 특이 원인:** <span style='color:#FF5722; font-weight:bold;'>{유저_데이터['주요원인_특성']}</span>", unsafe_allow_html=True)
             
-            # 🎯 [기능 추가] 해당 검색 유저의 실제 수치를 정상 기준값(사이드바)으로 즉시 동기화
-            if st.button("🎯 이 유저의 지표를 정상 기준으로 설정", use_container_width=True):
-                st.session_state["cfg_체류시간"] = int(round(유저_데이터["체류시간"]))
-                st.session_state["cfg_클릭수"] = int(round(유저_데이터["클릭수"]))
-                st.session_state["cfg_결제액"] = int(round(유저_데이터["결제액"]))
-                st.session_state["cfg_에러수"] = int(round(유저_데이터["에러수"]))
-                st.session_state["cfg_스크롤깊이"] = int(round(유저_데이터["스크롤깊이"]))
-                st.rerun()
+            # 🎯 [버그 해결] on_click 콜백 함수 구조로 변경하여 생명주기 예외 완벽 회피
+            st.button(
+                "🎯 이 유저의 지표를 정상 기준으로 설정", 
+                use_container_width=True,
+                on_click=세션_기준값_업데이트,
+                args=(유저_데이터,)
+            )
 
             st.markdown("**📋 상세 지표 현황**")
             지표_데이터 = {}
