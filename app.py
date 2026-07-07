@@ -214,56 +214,52 @@ with 좌측_화면:
     st.plotly_chart(fig, use_container_width=True)
 
 # ==========================================
-# 우측 화면: 탭으로 분리 (검색은 "선택창"만, 통계/TOP10은 그대로)
-# [변경] 검색 결과(프로필/표/그래프/AI코멘트)는 더 이상 이 좁은 컬럼에 넣지 않고
-# 아래쪽 전체 폭 섹션으로 내림. 여기서는 selectbox만 남긴다.
+# 우측 화면: [변경] 탭 완전히 제거. 좁은 컬럼 + 탭 조합이 모바일에서
+# 비활성 탭 내용을 제대로 숨기지 못하는 문제가 있었음.
+# 이제 이 컬럼엔 검색창 하나만 남기고, 통계/TOP10/상세분석은
+# 전부 그래프 아래 전체 폭 섹션으로 내려서 탭 동작 자체에 의존하지 않게 함.
 # ==========================================
 with 우측_화면:
-    탭_검색, 탭_통계 = st.tabs(["🔍 유저 상세 검색", "📊 통계 · TOP 10"])
+    st.markdown("#### 🔍 유저 상세 검색")
+    유저_옵션 = ["선택 안 함"] + list(df['유저 번호'].values)
+    if st.session_state.get("selected_user_search") not in 유저_옵션:
+        st.session_state["selected_user_search"] = "선택 안 함"
 
-    with 탭_검색:
-        유저_옵션 = ["선택 안 함"] + list(df['유저 번호'].values)
-        # key 부여로 재실행 간 선택 상태 유지. 데이터 재생성으로 기존 선택값이
-        # 옵션에 없으면 안전하게 "선택 안 함"으로 되돌린다.
-        if st.session_state.get("selected_user_search") not in 유저_옵션:
-            st.session_state["selected_user_search"] = "선택 안 함"
-
-        선택된_유저 = st.selectbox(
-            "유저 번호를 선택하거나 타이핑하여 검색하세요.",
-            options=유저_옵션,
-            key="selected_user_search"
-        )
-        if 선택된_유저 != "선택 안 함":
-            st.caption("⬇️ 상세 분석 결과는 아래 그래프 하단에 표시됩니다.")
-        else:
-            st.caption("그래프를 참고해 유저 번호를 검색해보세요.")
-
-    with 탭_통계:
-        안전_수 = int((df['상태'] == '🔵 안전 (정상 패턴)').sum())
-        주의_수 = int((df['상태'] == '🟡 주의 (관찰 요망)').sum())
-        위험_수 = int((df['상태'] == '🔴 위험 (차단 대상)').sum())
-
-        통계_좌, 통계_우 = st.columns(2)
-        with 통계_좌:
-            st.metric(label="전체 모니터링 대상", value=f"{len(df)} 명")
-            st.metric(label="🟡 주의 행동 감지", value=f"{주의_수} 건")
-        with 통계_우:
-            st.metric(label="🔴 위험 행동 감지", value=f"{위험_수} 건")
-            st.metric(label="🔵 안전 유저", value=f"{안전_수} 명")
-
-        st.markdown("---")
-        st.write("**⚠️ 실시간 고위험 유저 (Top 10)**")
-        보여줄_컬럼 = ['유저 번호', '상태', '위험도 점수'] + 기본_특성
-        st.dataframe(
-            df[df['상태'] == '🔴 위험 (차단 대상)'][보여줄_컬럼]
-            .sort_values(by='위험도 점수', ascending=False)
-            .head(10),
-            hide_index=True,
-            use_container_width=True
-        )
+    선택된_유저 = st.selectbox(
+        "유저 번호를 선택하거나 타이핑하여 검색하세요.",
+        options=유저_옵션,
+        key="selected_user_search"
+    )
+    st.caption("⬇️ 통계 · TOP10 · 상세 분석은 그래프 아래에 표시됩니다.")
 
 # ==========================================
-# [신규] 유저 상세 분석 - 그래프/탭 아래, 전체 폭으로 표시
+# [신규] 통계 · TOP10 - 그래프 아래, 전체 폭으로 표시 (탭 대신)
+# ==========================================
+st.divider()
+st.markdown("#### 📊 탐지 통계 · TOP 10")
+
+안전_수 = int((df['상태'] == '🔵 안전 (정상 패턴)').sum())
+주의_수 = int((df['상태'] == '🟡 주의 (관찰 요망)').sum())
+위험_수 = int((df['상태'] == '🔴 위험 (차단 대상)').sum())
+
+통계1, 통계2, 통계3, 통계4 = st.columns(4)
+통계1.metric(label="전체 모니터링 대상", value=f"{len(df)} 명")
+통계2.metric(label="🔵 안전 유저", value=f"{안전_수} 명")
+통계3.metric(label="🟡 주의 행동 감지", value=f"{주의_수} 건")
+통계4.metric(label="🔴 위험 행동 감지", value=f"{위험_수} 건")
+
+st.write("**⚠️ 실시간 고위험 유저 (Top 10)**")
+보여줄_컬럼 = ['유저 번호', '상태', '위험도 점수'] + 기본_특성
+st.dataframe(
+    df[df['상태'] == '🔴 위험 (차단 대상)'][보여줄_컬럼]
+    .sort_values(by='위험도 점수', ascending=False)
+    .head(10),
+    hide_index=True,
+    use_container_width=True
+)
+
+# ==========================================
+# 유저 상세 분석 - 그래프 아래, 전체 폭으로 표시
 # ==========================================
 if 선택된_유저 != "선택 안 함":
     st.divider()
