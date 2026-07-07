@@ -57,6 +57,8 @@ if 'random_seed' not in st.session_state:
     st.session_state.random_seed = 42
 if 'current_scenario' not in st.session_state:
     st.session_state.current_scenario = "1. 평범한 평일 (기본)"
+if 'last_uploaded_file' not in st.session_state:
+    st.session_state.last_uploaded_file = None
 
 for key, val in SCENARIO_DEFAULTS[st.session_state.current_scenario].items():
     if f"cfg_{key}" not in st.session_state:
@@ -87,8 +89,8 @@ if 데이터_소스 == "📂 내 파일 업로드 (CSV/Excel)":
         * `체류시간`, `클릭수`, `결제액`, `에러수`, `스크롤깊이`
         
         **3. 시스템 자동 처리 사항**
-        * **유저 번호:** 파일에 해당 컬럼이 없으면 시스템이 임의로 생성합니다.
-        * **결측치(빈칸):** 빈칸이 포함된 지표는 전체 데이터의 평균값으로 자동 대체되어 분석됩니다.
+        * **유저 번호:** 파일에 없으면 시스템이 자동 생성
+        * **자동 기준값 설정:** 파일을 업로드하면 사이드바의 **정상 유저 기준값**이 해당 파일의 실제 평균값으로 즉시 세팅됩니다.
         """)
 
     업로드된_파일 = st.sidebar.file_uploader("파일을 선택하세요", type=["csv", "xlsx"])
@@ -99,38 +101,36 @@ if 데이터_소스 == "📂 내 파일 업로드 (CSV/Excel)":
     
     if 업로드된_파일 is not None:
         try:
-            if 업로드된_파일.name.endswith('.csv'):
-                user_df = pd.read_csv(업로드된_파일)
+            # 🚨 [방어 로직 1] 공백으로 한 줄로 이어진 파일 구조 정상화
+            content = 업로드된_파일.getvalue().decode('utf-8', errors='ignore').strip()
+            if '\n' not in content and ' ' in content:
+                parts = content.split(' ')
+                header = "유저 번호,체류시간,클릭수,결제액,에러수,스크롤깊이".split(',')
+                data_rows = [row.split(',') for row in parts[2:] if row]
+                user_df = pd.DataFrame(data_rows, columns=header)
             else:
-                user_df = pd.read_excel(업로드된_파일)
+                업로드된_파일.seek(0)
+                if 업로드된_파일.name.endswith('.csv'):
+                    user_df = pd.read_csv(업로드된_파일)
+                else:
+                    user_df = pd.read_excel(업로드된_파일)
             
-            # 🚨 [해결책 1] 눈에 안 보이는 인코딩 깨짐(BOM) 및 앞뒤 공백 완전 제거
+            # 🚨 [방어 로직 2] 유령 문자(BOM) 제거 및 사전 매핑을 통한 컬럼명 강제 연결
             user_df.columns = user_df.columns.str.replace('\ufeff', '').str.strip()
-            
-            # 🚨 [해결책 2] 사전(Dict) 매핑 방식으로 안전하고 확실하게 컬럼명 강제 매칭
             치환_사전 = {}
             for col in user_df.columns:
-                if '유저' in col or '번호' in col:
-                    치환_사전[col] = '유저 번호'
-                elif '체류' in col:
-                    치환_사전[col] = '체류시간'
-                elif '클릭' in col:
-                    치환_사전[col] = '클릭수'
-                elif '결제' in col:
-                    치환_사전[col] = '결제액'
-                elif '에러' in col:
-                    치환_사전[col] = '에러수'
-                elif '스크롤' in col or '깊이' in col:
-                    치환_사전[col] = '스크롤깊이'
-            
+                if '유저' in col or '번호' in col: 치환_사전[col] = '유저 번호'
+                elif '체류' in col: 치환_사전[col] = '체류시간'
+                elif '클릭' in col: 치환_사전[col] = '클릭수'
+                elif '결제' in col: 치환_사전[col] = '결제액'
+                elif '에러' in col: 치환_사전[col] = '에러수'
+                elif '스크롤' in col or '깊이' in col: 치환_사전[col] = '스크롤깊이'
             user_df.rename(columns=치환_사전, inplace=True)
-            
-            # 🚨 [해결책 3] Plotly 붕괴를 막기 위한 중복 컬럼 자동 제거 안전장치
             user_df = user_df.loc[:, ~user_df.columns.duplicated()]
                 
             누락된_컬럼 = [col for col in 기본_특성 if col not in user_df.columns]
             if 누락된_컬럼:
-                st.error(f"🚨 **업로드 실패:** 파일에 필수 컬럼이 누락되었습니다: **{', '.join(누락된_컬럼)}**")
+                st.error(f"🚨 **업로드 실패:** 필수 컬럼 누락: **{', '.join(누락된_컬럼)}**")
                 st.stop()
                 
             if '유저 번호' not in user_df.columns:
@@ -140,14 +140,21 @@ if 데이터_소스 == "📂 내 파일 업로드 (CSV/Excel)":
                 st.error("🚨 3차원 그래프(PCA)를 생성하려면 데이터가 **최소 3줄 이상**이어야 합니다.")
                 st.stop()
                 
+            # 데이터를 확실히 숫자로 변환
+            user_df[기본_특성] = user_df[기본_특성].apply(pd.to_numeric, errors='coerce')
+                
             for col in 기본_특성:
                 컬럼_평균 = user_df[col].mean()
-                if pd.isna(컬럼_평균):
-                    컬럼_평균 = 0
+                if pd.isna(컬럼_평균): 컬럼_평균 = 0
                 user_df[col] = user_df[col].fillna(컬럼_평균)
                 
+            # 🎯 [핵심] 파일이 새로 업로드되면, 파일의 평균값을 사이드바 기준값 세션에 덮어쓰기!
+            if st.session_state.last_uploaded_file != 업로드된_파일.name:
+                st.session_state.last_uploaded_file = 업로드된_파일.name
+                for col in 기본_특성:
+                    st.session_state[f"cfg_{col}"] = int(round(user_df[col].mean()))
+                
             분석용_데이터 = user_df[기본_특성]
-            
             pca = PCA(n_components=3)
             잠재공간 = pca.fit_transform(분석용_데이터)
             user_df['잠재축 X'], user_df['잠재축 Y'], user_df['잠재축 Z'] = 잠재공간[:, 0], 잠재공간[:, 1], 잠재공간[:, 2]
@@ -159,6 +166,7 @@ if 데이터_소스 == "📂 내 파일 업로드 (CSV/Excel)":
             st.error(f"🚨 파일을 읽는 중 오류가 발생했습니다: {e}")
             st.stop()
     else:
+        st.session_state.last_uploaded_file = None
         st.info("👈 사이드바에서 분석할 CSV 또는 Excel 파일을 업로드해주세요.")
         st.stop()
 
@@ -166,6 +174,7 @@ if 데이터_소스 == "📂 내 파일 업로드 (CSV/Excel)":
 # [분기 2] 무작위 시뮬레이션 모드
 # ==========================================
 else:
+    st.session_state.last_uploaded_file = None
     st.sidebar.markdown("### 🎲 데이터 시뮬레이션")
     if st.sidebar.button("🔄 새로운 무작위 유저 패턴 생성", use_container_width=True):
         st.session_state.random_seed = np.random.randint(0, 100000)
@@ -193,6 +202,7 @@ else:
 
 # ==========================================
 # 공통 UI: 정상치 기준값 수동 조작 및 민감도 설정
+# (위에서 파일 업로드 시 연동된 session_state 값이 여기에 꽂힘)
 # ==========================================
 st.sidebar.markdown("---")
 st.sidebar.markdown("### ✍️ 정상 유저 기준값(평균) 설정")
@@ -213,13 +223,13 @@ st.sidebar.markdown("### 🚨 판정 민감도 (상세 조건 설정)")
 주의_연산자 = 주의_콜2.selectbox("조건", ["이상 (≥)", "초과 (>)"], key="caution_op")
 
 if 주의_점수 >= 위험_점수:
-    st.sidebar.error("⚠️ 오류: '🔴 차단' 점수가 '🟡 주의' 점수보다 높아야 합니다.")
+    st.sidebar.error("⚠️ 오류: '🔴 차단' 점수가 '🟡 주의' 점보다 높아야 합니다.")
 
 # ==========================================
 # 데이터 처리 시작
 # ==========================================
 df = base_df.copy()
-df = df.loc[:, ~df.columns.duplicated()] # 최종 데이터프레임 중복 컬럼 방어
+df = df.loc[:, ~df.columns.duplicated()]
 
 설정_기준점 = np.array([정상_체류, 정상_클릭, 정상_결제, 정상_에러, 정상_스크롤])
 z_scores = np.abs((df[기본_특성].values - 설정_기준점) / 정상_시그마)
