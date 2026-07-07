@@ -279,6 +279,41 @@ with 우측_화면:
                 편차_문구 = f"+{편차:.1f}" if 편차 > 0 else f"{편차:.1f}"
                 지표_데이터[특성] = f"{값:.1f} (정상대비 {편차_문구})"
             st.json(지표_데이터)
+
+            st.markdown("---")
+            st.markdown("### 🤖 AI 판정 근거 분석")
+            contrib = {}
+            for 특성, sigma in zip(기본_특성, 정상_시그마):
+                값 = 유저_데이터[특성]
+                기준 = 설정_시리즈[특성]
+                z = abs((값-기준)/sigma)
+                contrib[특성]=z
+                if z>=3:
+                    st.error(f"{특성}: Z-score {z:.2f}")
+                elif z>=2:
+                    st.warning(f"{특성}: Z-score {z:.2f}")
+                else:
+                    st.success(f"{특성}: 정상 (Z-score {z:.2f})")
+
+            st.markdown("### 📊 변수별 위험 기여도")
+            import plotly.express as px
+            import pandas as pd
+            s=pd.Series(contrib)
+            if s.sum()>0:
+                p=(s/s.sum()*100).sort_values(ascending=False)
+                fig2=px.bar(x=p.values,y=p.index,orientation='h',
+                            labels={'x':'기여도(%)','y':'변수'})
+                st.plotly_chart(fig2,use_container_width=True)
+
+                st.markdown("### 🧠 AI 종합 분석")
+                top=p.index[0]
+                txt=f"가장 큰 이상 원인은 **{top}**이며, "
+                if len(p[p>15])>1:
+                    txt+=f"{', '.join(list(p[p>15].index)[1:])}도 함께 위험도 증가에 영향을 주었습니다."
+                else:
+                    txt+="다른 변수들은 상대적으로 정상 범위에 가깝습니다."
+                st.info(txt)
+
             
     st.markdown("---")
     st.write("**⚠️ 실시간 고위험 유저 (Top 10)**")
