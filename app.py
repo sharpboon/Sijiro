@@ -104,8 +104,12 @@ if 데이터_소스 == "📂 내 파일 업로드 (CSV/Excel)":
             else:
                 user_df = pd.read_excel(업로드된_파일)
             
-            # 🚨 [추가된 핵심 로직] 컬럼명 앞뒤의 보이지 않는 띄어쓰기(공백)를 자동 제거!
+            # 🚨 [초강력 방어 로직] 유령 문자 및 인코딩 깨짐으로 인한 컬럼 매칭 실패 원천 차단
             user_df.columns = user_df.columns.str.strip()
+            for target in 기본_특성:
+                for col in user_df.columns:
+                    if target in col:  # 글자 뒤에 \r 이나 공백이 붙어있어도 감지해서 원본 컬럼명으로 치환
+                        user_df.rename(columns={col: target}, inplace=True)
                 
             누락된_컬럼 = [col for col in 기본_특성 if col not in user_df.columns]
             if 누락된_컬럼:
@@ -140,8 +144,9 @@ if 데이터_소스 == "📂 내 파일 업로드 (CSV/Excel)":
     else:
         st.info("👈 사이드바에서 분석할 CSV 또는 Excel 파일을 업로드해주세요.")
         st.stop()
+
 # ==========================================
-# [분기 2] 무작위 시뮬레이션 모드 (기존 로직)
+# [분기 2] 무작위 시뮬레이션 모드
 # ==========================================
 else:
     st.sidebar.markdown("### 🎲 데이터 시뮬레이션")
@@ -273,7 +278,7 @@ with 좌측_화면:
             '🟡 주의 (관찰 요망)': 'rgba(255, 193, 7, 0.85)',
             '🔴 위험 (차단 대상)': 'rgba(255, 30, 30, 1.0)'
         },
-        size='마커크기', size_max=15,
+        size='마कर크기', size_max=15,
         custom_data=['유저 번호', '상태', '위험도 점수', '체류시간_표시', '클릭수_표시', '결제액_표시', '에러수_표시', '스크롤깊이_표시'],
         template='plotly_dark'
     )
