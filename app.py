@@ -77,14 +77,13 @@ base_df = None
 if 데이터_소스 == "📂 내 파일 업로드 (CSV/Excel)":
     st.sidebar.markdown("### 📥 데이터 파일 업로드")
     
-    # [추가됨] 파일 업로드 양식 안내 가이드 (접기/펴기)
     with st.sidebar.expander("💡 파일 업로드 양식 안내", expanded=False):
         st.markdown("""
         **1. 지원 파일 형식**
         * CSV 파일 (`.csv`)
         * Excel 파일 (`.xlsx`)
         
-        **2. 필수 데이터 (컬럼명 정확히 일치 필요)**
+        **2. 필수 데이터 (컬럼명 일치 필요)**
         * `체류시간`, `클릭수`, `결제액`, `에러수`, `스크롤깊이`
         
         **3. 시스템 자동 처리 사항**
@@ -104,6 +103,9 @@ if 데이터_소스 == "📂 내 파일 업로드 (CSV/Excel)":
                 user_df = pd.read_csv(업로드된_파일)
             else:
                 user_df = pd.read_excel(업로드된_파일)
+            
+            # 🚨 [추가된 핵심 로직] 컬럼명 앞뒤의 보이지 않는 띄어쓰기(공백)를 자동 제거!
+            user_df.columns = user_df.columns.str.strip()
                 
             누락된_컬럼 = [col for col in 기본_특성 if col not in user_df.columns]
             if 누락된_컬럼:
@@ -138,7 +140,6 @@ if 데이터_소스 == "📂 내 파일 업로드 (CSV/Excel)":
     else:
         st.info("👈 사이드바에서 분석할 CSV 또는 Excel 파일을 업로드해주세요.")
         st.stop()
-
 # ==========================================
 # [분기 2] 무작위 시뮬레이션 모드 (기존 로직)
 # ==========================================
