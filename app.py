@@ -3,6 +3,7 @@ import numpy as np
 import pandas as pd
 from sklearn.decomposition import PCA
 import plotly.express as px
+from streamlit_plotly_events import plotly_events  # 🎯 3D 클릭 이벤트를 강제로 잡아내는 외부 플러그인
 
 st.set_page_config(page_title="이상 패턴 탐지 대시보드", layout="wide")
 
@@ -55,7 +56,7 @@ st.sidebar.markdown("---")
 주의_비율 = st.sidebar.slider("🟡 주의 판정 비율", 5, 30, 10, 1, format="%d%%")
 
 # ==========================================
-# 3. 데이터 생성 및 PCA 캐싱 (🔥 렉 방지의 핵심)
+# 3. 데이터 생성 및 PCA 캐싱 (렉 방지)
 # ==========================================
 현재_설정 = {"seed": st.session_state.random_seed, "scenario": st.session_state.current_scenario, "n_norm": 정상_샘플수, "n_anom": 이상_샘플수}
 
@@ -72,7 +73,6 @@ if st.session_state.last_settings != 현재_설정 or 'cached_base_df' not in st
     base_df = pd.DataFrame(전체_데이터, columns=기본_특성).clip(lower=0)
     base_df.insert(0, '유저 번호', [f"USR-{i+1:04d}" for i in range(len(base_df))])
 
-    # 가장 무거운 PCA 연산을 최초 1회만 수행하고 저장
     pca = PCA(n_components=3)
     잠재공간 = pca.fit_transform(base_df[기본_특성])
     base_df['잠재축 X'], base_df['잠재축 Y'], base_df['잠재축 Z'] = 잠재공간[:, 0], 잠재공간[:, 1], 잠재공간[:, 2]
@@ -80,13 +80,12 @@ if st.session_state.last_settings != 현재_설정 or 'cached_base_df' not in st
     st.session_state.cached_base_df = base_df
     st.session_state.last_settings = 현재_설정
 
-# 캐싱된 데이터 불러오기 (매우 빠름)
 df = st.session_state.cached_base_df.copy()
 기본_특성 = ['체류시간', '클릭수', '결제액', '에러수', '스크롤깊이']
 정상_시그마 = np.array([10, 2, 20, 0.5, 10])
 
 # ==========================================
-# 4. 실시간 위험도 평가 (가벼운 연산)
+# 4. 실시간 위험도 평가
 # ==========================================
 설정_기준점 = np.array([정상_체류, 정상_클릭, 정상_결제, 정상_에러, 정상_스크롤])
 z_scores = np.abs((df[기본_특성].values - 설정_기준점) / 정상_시그마)
@@ -118,53 +117,53 @@ for 특성, 기준 in zip(기본_특성, 설정_기준점):
     df[f'{특성}_표시'] = df.apply(lambda row: format_hover_text(row, 특성, 기준), axis=1)
 
 # ==========================================
-# 5. 화면 분할 및 그래프 시각화
+# 5. 화면 분할 및 3D 그래프 생성
 # ==========================================
 좌측_화면, 우측_화면 = st.columns([3, 1.2]) 
 
 with 좌측_화면:
-    st.info("💡 **안내:** 3D는 전체적인 분포를 볼 때, 2D는 유저를 **클릭(선택)**할 때 사용하세요. (이제 2D 클릭 시 렉이 걸리지 않습니다)")
-    뷰_모드 = st.radio("그래프 모드", ["🗺️ 2D 모드 (클릭 가능, 매우 빠름)", "🌐 3D 뷰어 (클릭 불가, 분포 확인용)"], horizontal=True, label_visibility="collapsed")
+    st.info("👆 **이제 3D 그래프의 점을 직접 클릭해보세요!** 렉 없이 유저 정보가 우측에 뜹니다.")
     
     호버_템플릿 = (
         "<b>[%{customdata[0]}] %{customdata[1]}</b><br>위험도 점수: %{customdata[2]} / 100 점<br>-----------------------------------<br>"
         "체류시간 : %{customdata[3]}<br>클릭수   : %{customdata[4]}<br>결제액   : %{customdata[5]}<br>에러수   : %{customdata[6]}<br>스크롤   : %{customdata[7]}<br><extra></extra>"
     )
     
-    선택_결과 = None
+    fig = px.scatter_3d(
+        df, x='잠재축 X', y='잠재축 Y', z='잠재축 Z', color='상태',
+        color_discrete_map={'🔵 안전 (정상 패턴)': 'rgba(30, 136, 229, 0.2)', '🟡 주의 (관찰 요망)': 'rgba(255, 193, 7, 0.8)', '🔴 위험 (차단 대상)': 'rgba(255, 30, 30, 1.0)'},
+        size='마커크기', size_max=15,
+        custom_data=['유저 번호', '상태', '위험도 점수', '체류시간_표시', '클릭수_표시', '결제액_표시', '에러수_표시', '스크롤깊이_표시'],
+        template='plotly_dark'
+    )
+    fig.update_traces(hovertemplate=호버_템플릿)
+    fig.update_layout(
+        height=720, margin=dict(l=0, r=0, b=0, t=0), 
+        hoverlabel=dict(bgcolor="white", font_color="black"),
+        legend=dict(yanchor="top", y=0.99, xanchor="left", x=0.01)
+    )
     
-    if "2D" in 뷰_모드:
-        fig = px.scatter(
-            df, x='잠재축 X', y='잠재축 Y', color='상태',
-            color_discrete_map={'🔵 안전 (정상 패턴)': 'rgba(30, 136, 229, 0.4)', '🟡 주의 (관찰 요망)': 'rgba(255, 193, 7, 0.9)', '🔴 위험 (차단 대상)': 'rgba(255, 30, 30, 1.0)'},
-            size='마커크기', size_max=18,
-            custom_data=['유저 번호', '상태', '위험도 점수', '체류시간_표시', '클릭수_표시', '결제액_표시', '에러수_표시', '스크롤깊이_표시'],
-            template='plotly_dark'
-        )
-        fig.update_traces(hovertemplate=호버_템플릿)
-        fig.update_layout(hoverlabel=dict(bgcolor="white", font_color="black"), margin=dict(l=0, r=0, b=0, t=30), legend=dict(yanchor="top", y=0.99, xanchor="left", x=0.01))
-        
-        # 🎯 2D에서만 클릭 활성화 (캐싱 덕분에 이제 클릭해도 렉이 없습니다)
-        선택_결과 = st.plotly_chart(fig, use_container_width=True, height=650, on_select="rerun")
-    else:
-        fig = px.scatter_3d(
-            df, x='잠재축 X', y='잠재축 Y', z='잠재축 Z', color='상태',
-            color_discrete_map={'🔵 안전 (정상 패턴)': 'rgba(30, 136, 229, 0.15)', '🟡 주의 (관찰 요망)': 'rgba(255, 193, 7, 0.8)', '🔴 위험 (차단 대상)': 'rgba(255, 30, 30, 1.0)'},
-            size='마커크기', size_max=15,
-            custom_data=['유저 번호', '상태', '위험도 점수', '체류시간_표시', '클릭수_표시', '결제액_표시', '에러수_표시', '스크롤깊이_표시'],
-            template='plotly_dark'
-        )
-        fig.update_traces(hovertemplate=호버_템플릿)
-        fig.update_layout(hoverlabel=dict(bgcolor="white", font_color="black"), margin=dict(l=0, r=0, b=0, t=0), legend=dict(yanchor="top", y=0.99, xanchor="left", x=0.01))
-        st.plotly_chart(fig, use_container_width=True, height=650)
+    # 🎯 핵심 우회 기술: 공식 st.plotly_chart를 버리고 외부 플러그인으로 3D 클릭 강제 활성화
+    선택_결과 = plotly_events(fig, click_event=True, hover_event=False, key="3d_clicker")
 
 # ==========================================
-# 6. 2D 그래프 클릭 이벤트 처리
+# 6. 3D 클릭 좌표 역추적 로직 (좌표 -> 유저 매칭)
 # ==========================================
-if 선택_결과 and "selection" in 선택_결과:
-    포인트들 = 선택_결과["selection"].get("points", [])
-    if 포인트들:
-        클릭된_유저_아이디 = 포인트들[0]["customdata"][0]
+if 선택_결과:
+    클릭_x = 선택_결과[0].get('x')
+    클릭_y = 선택_결과[0].get('y')
+    클릭_z = 선택_결과[0].get('z')
+    
+    # 클릭한 미세한 float 좌표를 기반으로 유저를 역산하여 찾아냅니다
+    매칭_조건 = (np.abs(df['잠재축 X'] - 클릭_x) < 1e-4) & (np.abs(df['잠재축 Y'] - 클릭_y) < 1e-4)
+    if 클릭_z is not None:
+        매칭_조건 &= (np.abs(df['잠재축 Z'] - 클릭_z) < 1e-4)
+        
+    매칭된_유저 = df[매칭_조건]
+    
+    if not 매칭된_유저.empty:
+        클릭된_유저_아이디 = 매칭된_유저.iloc[0]['유저 번호']
+        # 클릭한 유저가 기존에 보던 유저와 다르면 상태 업데이트 후 즉시 연동(rerun)
         if st.session_state.selected_user_id != 클릭된_유저_아이디:
             st.session_state.selected_user_id = 클릭된_유저_아이디
             st.rerun()
@@ -183,7 +182,7 @@ def 기준값_동기화(유저_데이터):
 # ==========================================
 with 우측_화면:
     st.subheader("🔍 개별 유저 상세 정보")
-    선택된_유저 = st.selectbox("2D 그래프에서 점을 클릭하거나 직접 검색하세요 👆", options=유저_옵션_리스트, key="selected_user_id")
+    선택된_유저 = st.selectbox("3D 그래프에서 점을 클릭하거나 직접 검색하세요 👆", options=유저_옵션_리스트, key="selected_user_id")
     
     if 선택된_유저 != "선택 안 함":
         유저_데이터 = df[df['유저 번호'] == 선택된_유저].iloc[0]
