@@ -1,4 +1,4 @@
 pandas
 scikit-learn
 plotly
-streamlit
+streamlit-plotly-events
