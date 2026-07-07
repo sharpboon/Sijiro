@@ -214,15 +214,17 @@ with 좌측_화면:
     st.plotly_chart(fig, use_container_width=True)
 
 # ==========================================
-# 우측 화면: 탭으로 분리 (검색/상세 vs 통계/TOP10)
+# 우측 화면: 탭으로 분리 (검색은 "선택창"만, 통계/TOP10은 그대로)
+# [변경] 검색 결과(프로필/표/그래프/AI코멘트)는 더 이상 이 좁은 컬럼에 넣지 않고
+# 아래쪽 전체 폭 섹션으로 내림. 여기서는 selectbox만 남긴다.
 # ==========================================
 with 우측_화면:
     탭_검색, 탭_통계 = st.tabs(["🔍 유저 상세 검색", "📊 통계 · TOP 10"])
 
     with 탭_검색:
         유저_옵션 = ["선택 안 함"] + list(df['유저 번호'].values)
-        # [개선] key 부여로 재실행 간 선택 상태 유지. 단, 데이터가 재생성돼서
-        # 기존 선택값이 옵션에 없으면 안전하게 "선택 안 함"으로 되돌린다.
+        # key 부여로 재실행 간 선택 상태 유지. 데이터 재생성으로 기존 선택값이
+        # 옵션에 없으면 안전하게 "선택 안 함"으로 되돌린다.
         if st.session_state.get("selected_user_search") not in 유저_옵션:
             st.session_state["selected_user_search"] = "선택 안 함"
 
@@ -231,57 +233,8 @@ with 우측_화면:
             options=유저_옵션,
             key="selected_user_search"
         )
-
         if 선택된_유저 != "선택 안 함":
-            유저_데이터 = df[df['유저 번호'] == 선택된_유저].iloc[0]
-
-            with st.container(border=True):
-                st.markdown(f"### 👤 {선택된_유저} 프로필")
-                st.markdown(f"**현재 상태:** {유저_데이터['상태']}")
-                st.markdown(f"**위험도 점수:** `{유저_데이터['위험도 점수']}` / 100 점")
-                if 유저_데이터['상태'] != '🔵 안전 (정상 패턴)':
-                    st.markdown(f"⚠️ **주요 특이 원인:** <span style='color:#FF5722; font-weight:bold;'>{유저_데이터['주요원인_특성']}</span>", unsafe_allow_html=True)
-
-                st.button(
-                    "🎯 이 유저의 지표를 정상 기준으로 설정",
-                    use_container_width=True,
-                    on_click=세션_기준값_업데이트,
-                    args=(유저_데이터,)
-                )
-
-                # [개선] st.json 대신 표 형태로 지표 표시 (가독성 개선)
-                st.markdown("**📋 상세 지표 현황**")
-                지표_행 = []
-                z_행 = []
-                for 특성, 기준, sigma in zip(기본_특성, 설정_기준점, 정상_시그마):
-                    값 = 유저_데이터[특성]
-                    편차 = 값 - 기준
-                    z = abs(편차 / sigma)
-                    지표_행.append({
-                        "지표": 특성,
-                        "값": f"{값:.1f}",
-                        "기준대비": f"{'+' if 편차 > 0 else ''}{편차:.1f}",
-                        "Z-score": round(z, 2),
-                        "판정": "🔴 심각" if z >= 3 else ("🟡 주의" if z >= 2 else "🟢 정상")
-                    })
-                지표_표 = pd.DataFrame(지표_행)
-                st.dataframe(지표_표, hide_index=True, use_container_width=True)
-
-                # [개선] 위험 기여도 bar chart는 그대로 유지 (가벼운 연산)
-                기여도 = pd.Series({r["지표"]: r["Z-score"] for r in 지표_행})
-                if 기여도.sum() > 0:
-                    비율 = (기여도 / 기여도.sum() * 100).sort_values(ascending=False)
-                    fig2 = px.bar(x=비율.values, y=비율.index, orientation='h', labels={'x': '기여도(%)', 'y': '변수'})
-                    fig2.update_layout(height=220, margin=dict(l=0, r=0, t=10, b=0))
-                    st.plotly_chart(fig2, use_container_width=True)
-
-                    top = 비율.index[0]
-                    txt = f"가장 큰 이상 원인은 **{top}**이며, "
-                    if len(비율[비율 > 15]) > 1:
-                        txt += f"{', '.join(list(비율[비율 > 15].index)[1:])}도 함께 위험도 증가에 영향을 주었습니다."
-                    else:
-                        txt += "다른 변수들은 상대적으로 정상 범위에 가깝습니다."
-                    st.info(txt)
+            st.caption("⬇️ 상세 분석 결과는 아래 그래프 하단에 표시됩니다.")
         else:
             st.caption("그래프를 참고해 유저 번호를 검색해보세요.")
 
@@ -308,3 +261,58 @@ with 우측_화면:
             hide_index=True,
             use_container_width=True
         )
+
+# ==========================================
+# [신규] 유저 상세 분석 - 그래프/탭 아래, 전체 폭으로 표시
+# ==========================================
+if 선택된_유저 != "선택 안 함":
+    st.divider()
+    st.subheader(f"👤 {선택된_유저} 상세 분석")
+
+    유저_데이터 = df[df['유저 번호'] == 선택된_유저].iloc[0]
+
+    상세_좌, 상세_우 = st.columns([1.2, 1])
+
+    with 상세_좌:
+        st.markdown(f"**현재 상태:** {유저_데이터['상태']}")
+        st.markdown(f"**위험도 점수:** `{유저_데이터['위험도 점수']}` / 100 점")
+        if 유저_데이터['상태'] != '🔵 안전 (정상 패턴)':
+            st.markdown(f"⚠️ **주요 특이 원인:** <span style='color:#FF5722; font-weight:bold;'>{유저_데이터['주요원인_특성']}</span>", unsafe_allow_html=True)
+
+        st.button(
+            "🎯 이 유저의 지표를 정상 기준으로 설정",
+            on_click=세션_기준값_업데이트,
+            args=(유저_데이터,)
+        )
+
+        st.markdown("**📋 상세 지표 현황**")
+        지표_행 = []
+        for 특성, 기준, sigma in zip(기본_특성, 설정_기준점, 정상_시그마):
+            값 = 유저_데이터[특성]
+            편차 = 값 - 기준
+            z = abs(편차 / sigma)
+            지표_행.append({
+                "지표": 특성,
+                "값": f"{값:.1f}",
+                "기준대비": f"{'+' if 편차 > 0 else ''}{편차:.1f}",
+                "Z-score": round(z, 2),
+                "판정": "🔴 심각" if z >= 3 else ("🟡 주의" if z >= 2 else "🟢 정상")
+            })
+        지표_표 = pd.DataFrame(지표_행)
+        st.dataframe(지표_표, hide_index=True, use_container_width=True)
+
+    with 상세_우:
+        기여도 = pd.Series({r["지표"]: r["Z-score"] for r in 지표_행})
+        if 기여도.sum() > 0:
+            비율 = (기여도 / 기여도.sum() * 100).sort_values(ascending=False)
+            fig2 = px.bar(x=비율.values, y=비율.index, orientation='h', labels={'x': '기여도(%)', 'y': '변수'})
+            fig2.update_layout(height=260, margin=dict(l=0, r=0, t=10, b=0))
+            st.plotly_chart(fig2, use_container_width=True)
+
+            top = 비율.index[0]
+            txt = f"가장 큰 이상 원인은 **{top}**이며, "
+            if len(비율[비율 > 15]) > 1:
+                txt += f"{', '.join(list(비율[비율 > 15].index)[1:])}도 함께 위험도 증가에 영향을 주었습니다."
+            else:
+                txt += "다른 변수들은 상대적으로 정상 범위에 가깝습니다."
+            st.info(txt)
