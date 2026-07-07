@@ -1,11 +1,10 @@
 import streamlit as st
 import numpy as np
 import pandas as pd
-from sklearn.decomposition import PCA
 import plotly.express as px
+from sklearn.decomposition import PCA
 
 st.set_page_config(page_title="이상 패턴 탐지 대시보드", layout="wide")
-
 st.title("🚀 사용자 행동 3차원 잠재공간 및 이상 패턴 탐지 시스템")
 
 # ==========================================
@@ -16,9 +15,35 @@ SCENARIO_DEFAULTS = {
     "2. 주말 대규모 이벤트 (활동/결제 폭주)": {"체류시간": 90, "클릭수": 30, "결제액": 400, "에러수": 2, "스크롤깊이": 150},
     "3. 서버 장애 발생 (에러 폭주)": {"체류시간": 20, "클릭수": 5, "결제액": 10, "에러수": 25, "스크롤깊이": 30}
 }
+기본_특성 = ['체류시간', '클릭수', '결제액', '에러수', '스크롤깊이']
+정상_시그마 = np.array([10, 2, 20, 0.5, 10])
 
 # ==========================================
-# [버그 수정] 위젯 세션 상태를 안전하게 변경하기 위한 콜백 함수 정의
+# [핵심: 렉 해결] 데이터 생성 + PCA를 캐싱.
+# 시드/시나리오/샘플수가 그대로면, 기준값을 만지거나 유저를 검색해도
+# 이 함수는 재실행되지 않고 캐시된 결과를 그대로 재사용한다.
+# (기존 코드는 이 부분이 매 상호작용마다 무조건 재계산되어 렉의 핵심 원인이었음)
+# ==========================================
+@st.cache_data(show_spinner=False)
+def 데이터_생성_및_PCA(시드, 시나리오_키, 정상_샘플수, 이상_샘플수):
+    np.random.seed(시드)
+    시나리오_원래값 = SCENARIO_DEFAULTS[시나리오_키]
+    진짜_기본_기준점 = [시나리오_원래값[k] for k in 기본_특성]
+
+    정상_데이터 = np.random.normal(loc=진짜_기본_기준점, scale=정상_시그마, size=(정상_샘플수, 5))
+    이상_데이터 = np.random.uniform(low=[10, 50, 0, 10, 10], high=[100, 200, 500, 50, 100], size=(이상_샘플수, 5))
+
+    전체_데이터 = np.vstack([정상_데이터, 이상_데이터])
+    base_df = pd.DataFrame(전체_데이터, columns=기본_특성).clip(lower=0)
+    base_df.insert(0, '유저 번호', [f"USR-{i+1:04d}" for i in range(len(base_df))])
+
+    pca = PCA(n_components=3)
+    잠재공간 = pca.fit_transform(base_df[기본_특성])
+    base_df['잠재축 X'], base_df['잠재축 Y'], base_df['잠재축 Z'] = 잠재공간[:, 0], 잠재공간[:, 1], 잠재공간[:, 2]
+    return base_df
+
+# ==========================================
+# 위젯 콜백 함수
 # ==========================================
 def 세션_기준값_업데이트(유저_행_데이터):
     st.session_state["cfg_체류시간"] = int(round(유저_행_데이터["체류시간"]))
@@ -28,34 +53,30 @@ def 세션_기준값_업데이트(유저_행_데이터):
     st.session_state["cfg_스크롤깊이"] = int(round(유저_행_데이터["스크롤깊이"]))
 
 # ==========================================
-# 세션 상태(Session State) 초기화 로직
+# 세션 상태 초기화
 # ==========================================
 if 'random_seed' not in st.session_state:
     st.session_state.random_seed = 42
-
 if 'current_scenario' not in st.session_state:
     st.session_state.current_scenario = "1. 평범한 평일 (기본)"
 
-# 최초 실행 시 입력창용 세션 상태 세팅
 for key, val in SCENARIO_DEFAULTS[st.session_state.current_scenario].items():
     if f"cfg_{key}" not in st.session_state:
         st.session_state[f"cfg_{key}"] = val
 
 # ==========================================
-# 사이드바 (UI 컨트롤러)
+# 사이드바
 # ==========================================
 st.sidebar.header("⚙️ 시스템 설정")
-
 st.sidebar.markdown("### 🎲 데이터 시뮬레이션")
 if st.sidebar.button("🔄 새로운 무작위 유저 패턴 생성", use_container_width=True):
     st.session_state.random_seed = np.random.randint(0, 100000)
 
 시나리오 = st.sidebar.selectbox(
-    "시나리오 환경 선택", 
+    "시나리오 환경 선택",
     list(SCENARIO_DEFAULTS.keys()),
     index=list(SCENARIO_DEFAULTS.keys()).index(st.session_state.current_scenario)
 )
-
 if 시나리오 != st.session_state.current_scenario:
     st.session_state.current_scenario = 시나리오
     for key, val in SCENARIO_DEFAULTS[시나리오].items():
@@ -64,13 +85,11 @@ if 시나리오 != st.session_state.current_scenario:
 
 st.sidebar.markdown("---")
 st.sidebar.markdown("### ✍️ 정상치 기준값(평균) 직접 입력")
-
 if st.sidebar.button("↩️ 현재 시나리오 기본값으로 초기화", use_container_width=True):
     for key, val in SCENARIO_DEFAULTS[시나리오].items():
         st.session_state[f"cfg_{key}"] = val
     st.rerun()
 
-# 입력창
 정상_체류 = st.sidebar.number_input("정상 체류시간 평균", min_value=0, max_value=10000, step=1, key="cfg_체류시간")
 정상_클릭 = st.sidebar.number_input("정상 클릭수 평균", min_value=0, max_value=5000, step=1, key="cfg_클릭수")
 정상_결제 = st.sidebar.number_input("정상 결제액 평균", min_value=0, max_value=100000, step=10, key="cfg_결제액")
@@ -88,118 +107,86 @@ st.sidebar.markdown("### 🚨 판정 민감도 (상위 % 기준)")
 주의_비율 = st.sidebar.slider("🟡 주의(관찰) 판정 비율", min_value=5, max_value=30, value=10, step=1, format="%d%%")
 
 # ==========================================
-# 데이터 생성 로직 (유저 데이터 원본 고정)
+# 캐싱된 원본 데이터 로드 (여기서부터는 가벼운 연산만 남음)
 # ==========================================
-np.random.seed(st.session_state.random_seed)
-
-시나리오_원래값 = SCENARIO_DEFAULTS[시나리오]
-진짜_기본_기준점 = [시나리오_원래값['체류시간'], 시나리오_원래값['클릭수'], 시나리오_원래값['결제액'], 시나리오_원래값['에러수'], 시나리오_원래값['스크롤깊이']]
-
-정상_시그마 = np.array([10, 2, 20, 0.5, 10])
-정상_데이터 = np.random.normal(loc=진짜_기본_기준점, scale=정상_시그마, size=(정상_샘플수, 5))
-이상_데이터 = np.random.uniform(low=[10, 50, 0, 10, 10], high=[100, 200, 500, 50, 100], size=(이상_샘플수, 5))
-
-전체_데이터 = np.vstack([정상_데이터, 이상_데이터])
-기본_특성 = ['체류시간', '클릭수', '결제액', '에러수', '스크롤깊이']
-df = pd.DataFrame(전체_데이터, columns=기본_특성)
-df[기본_특성] = df[기본_특성].clip(lower=0) 
-
-df.insert(0, '유저 번호', [f"USR-{i+1:04d}" for i in range(len(df))])
+base_df = 데이터_생성_및_PCA(st.session_state.random_seed, 시나리오, 정상_샘플수, 이상_샘플수)
+df = base_df.copy()
 
 # ==========================================
-# 절대적 Z-Score 기반 위험도 점수 산정 (최대 100점 제한)
+# 실시간 위험도 평가 (라이브 기준값에 의존하므로 캐싱 불가, 대신 매우 가벼움)
 # ==========================================
 설정_기준점 = np.array([정상_체류, 정상_클릭, 정상_결제, 정상_에러, 정상_스크롤])
-
 z_scores = np.abs((df[기본_특성].values - 설정_기준점) / 정상_시그마)
-최대_이탈도 = np.max(z_scores, axis=1) 
-
+최대_이탈도 = np.max(z_scores, axis=1)
 df['위험도 점수'] = np.round(np.clip((최대_이탈도 / 5.5) * 100, 0, 100), 1)
 
 위험_문턱 = df['위험도 점수'].quantile(1.0 - (위험_비율 / 100.0))
 주의_문턱 = df['위험도 점수'].quantile(1.0 - ((위험_비율 + 주의_비율) / 100.0))
 
-def classify_status(row):
-    if row['위험도 점수'] >= 위험_문턱 or row['위험도 점수'] >= 80.0:
-        return '🔴 위험 (차단 대상)'
-    elif row['위험도 점수'] >= 주의_문턱 or row['위험도 점수'] >= 50.0:
-        return '🟡 주의 (관찰 요망)'
-    else:
-        return '🔵 안전 (정상 패턴)'
-
-df['상태'] = df.apply(classify_status, axis=1)
+조건_위험 = (df['위험도 점수'] >= 위험_문턱) | (df['위험도 점수'] >= 80.0)
+조건_주의 = (df['위험도 점수'] >= 주의_문턱) | (df['위험도 점수'] >= 50.0)
+df['상태'] = np.select([조건_위험, 조건_주의], ['🔴 위험 (차단 대상)', '🟡 주의 (관찰 요망)'], default='🔵 안전 (정상 패턴)')
 df['마커크기'] = df['상태'].map({'🔵 안전 (정상 패턴)': 2, '🟡 주의 (관찰 요망)': 6, '🔴 위험 (차단 대상)': 15})
 
-# ==========================================
-# 주요 이상 원인 및 실시간 동적 편차 텍스트 생성
-# ==========================================
 설정_시리즈 = pd.Series(설정_기준점, index=기본_특성)
 표준점수 = np.abs((df[기본_특성] - 설정_시리즈) / 정상_시그마)
 df['주요원인_특성'] = 표준점수.idxmax(axis=1)
 
-def format_hover_text(row, col, 기준값):
-    값 = row[col]
-    편차 = 값 - 기준값
-    편차표시 = f"+{편차:.1f}" if 편차 > 0 else f"{편차:.1f}"
-    기본문구 = f"{값:.1f} (기준대비 {편차표시})"
-    
-    if row['상태'] != '🔵 안전 (정상 패턴)' and row['주요원인_특성'] == col:
-        if '🔴 위험' in row['상태']:
-            return f'<b><span style="color:#D32F2F;">{기본문구} ◀ 원인</span></b>'
-        else:
-            return f'<b><span style="color:#E65100;">{기본문구} ◀ 원인</span></b>'
-    return 기본문구
-
+# [개선] .apply(axis=1) 대신 열 단위 벡터 연산으로 hover 텍스트 생성 (더 빠름)
+안전_마스크 = (df['상태'] == '🔵 안전 (정상 패턴)').values
+위험_마스크 = df['상태'].str.contains('위험').values
 for 특성, 기준 in zip(기본_특성, 설정_기준점):
-    df[f'{특성}_표시'] = df.apply(lambda row: format_hover_text(row, 특성, 기준), axis=1)
+    값 = df[특성].values
+    편차 = 값 - 기준
+    편차표시 = np.where(편차 > 0, [f"+{d:.1f}" for d in 편차], [f"{d:.1f}" for d in 편차])
+    기본문구 = np.array([f"{v:.1f} (기준대비 {d})" for v, d in zip(값, 편차표시)])
+    원인_마스크 = (~안전_마스크) & (df['주요원인_특성'].values == 특성)
+    강조문구 = np.where(
+        위험_마스크,
+        [f'<b><span style="color:#D32F2F;">{t} ◀ 원인</span></b>' for t in 기본문구],
+        [f'<b><span style="color:#E65100;">{t} ◀ 원인</span></b>' for t in 기본문구]
+    )
+    df[f'{특성}_표시'] = np.where(원인_마스크, 강조문구, 기본문구)
 
 # ==========================================
-# 차원 축소 (PCA)
+# 안내 가이드 (기본 접힘으로 변경 - 그래프를 먼저 보여주기 위함)
 # ==========================================
-pca = PCA(n_components=3)
-잠재공간 = pca.fit_transform(df[기본_특성])
-df['잠재축 X'] = 잠재공간[:, 0]
-df['잠재축 Y'] = 잠재공간[:, 1]
-df['잠재축 Z'] = 잠재공간[:, 2]
-
-# ==========================================
-# 사용자 안내 가이드 레이아웃
-# ==========================================
-with st.expander("💡 실시간 등급 판정 및 데이터별 이상 원인 분석 기준 안내", expanded=True):
+with st.expander("💡 실시간 등급 판정 및 데이터별 이상 원인 분석 기준 안내", expanded=False):
     공지_좌, 공지_우 = st.columns(2)
     with 공지_좌:
-        st.markdown(f"""
-        #### 📌 3단계 탐지 등급 산정 기준 (절대평가 하한선 적용 완료)
-        * **🔵 안전 (정상 패턴)**: 설정한 기준선 근처에 밀집되어 있으며, 절대 위험 점수가 50점 미만인 청정 유저군입니다.
-        * **🟡 주의 (관찰 요망)**: 설정된 기준에서 이탈한 상위 유저 혹은 **절대 위험 점수가 50점을 넘긴** 경계선 유저입니다.
-        * **🔴 위험 (차단 대상)**: 설정된 기준과 괴리가 매우 극심한 고위험군 혹은 **절대 위험 점수가 80점을 통과한** 유저입니다.
+        st.markdown("""
+        #### 📌 3단계 탐지 등급 산정 기준
+        * **🔵 안전**: 절대 위험 점수 50점 미만
+        * **🟡 주의**: 절대 위험 점수 50점 이상 또는 상위 이탈군
+        * **🔴 위험**: 절대 위험 점수 80점 이상 또는 상위 고위험군
         """)
     with 공지_우:
         st.markdown("""
-        #### 🔍 데이터별 동적 원인(`◀ 원인`) 도출 방식
-        * 유저들의 원래 고유 수치는 고정된 상태에서, 사이드바의 **정상치 기준값 수정을 기준으로 편차를 실시간 재연산**합니다.
-        * 유저의 원래 값이 내가 설정한 기준 평균치에서 통계적으로 가장 멀리 이탈한 지표에 `◀ 원인` 표시가 붙습니다.
+        #### 🔍 원인(`◀ 원인`) 도출 방식
+        * 유저 고유 수치는 고정, 사이드바 기준값 변경 시 편차만 실시간 재연산
+        * 기준 평균치에서 통계적으로 가장 멀리 이탈한 지표에 표시
         """)
 
 # ==========================================
-# 메인 화면 시각화
+# 메인 3D 그래프
 # ==========================================
-좌측_화면, 우측_화면 = st.columns([3, 1.2]) 
+좌측_화면, 우측_화면 = st.columns([3, 1.2])
 
 with 좌측_화면:
     fig = px.scatter_3d(
-        df, x='잠재축 X', y='잠재축 Y', z='잠재축 Z', 
+        df, x='잠재축 X', y='잠재축 Y', z='잠재축 Z',
         color='상태',
         color_discrete_map={
-            '🔵 안전 (정상 패턴)': 'rgba(30, 136, 229, 1.0)', 
-            '🟡 주의 (관찰 요망)': 'rgba(255, 193, 7, 0.8)',   
-            '🔴 위험 (차단 대상)': 'rgba(255, 30, 30, 1.0)'    
+            # [개선] 안전 유저 opacity 1.0 -> 0.18. 다수의 안전 유저가
+            # 소수의 위험 유저를 시각적으로 가리는 문제를 해결.
+            '🔵 안전 (정상 패턴)': 'rgba(30, 136, 229, 0.18)',
+            '🟡 주의 (관찰 요망)': 'rgba(255, 193, 7, 0.85)',
+            '🔴 위험 (차단 대상)': 'rgba(255, 30, 30, 1.0)'
         },
         size='마커크기', size_max=15,
         custom_data=['유저 번호', '상태', '위험도 점수', '체류시간_표시', '클릭수_표시', '결제액_표시', '에러수_표시', '스크롤깊이_표시'],
         template='plotly_dark'
     )
-    
     fig.update_traces(
         hovertemplate=(
             "<b>[%{customdata[0]}] %{customdata[1]}</b><br>"
@@ -213,7 +200,6 @@ with 좌측_화면:
             "<extra></extra>"
         )
     )
-    
     fig.update_layout(
         hoverlabel=dict(bgcolor="white", font_size=13, font_color="black", bordercolor="black"),
         scene=dict(
@@ -222,106 +208,103 @@ with 좌측_화면:
             zaxis=dict(showbackground=False, gridcolor='#333333', zerolinecolor='gray', title='행동 변동성 (Z)')
         ),
         margin=dict(l=0, r=0, b=0, t=0),
-        legend=dict(yanchor="top", y=0.99, xanchor="left", x=0.01)
+        legend=dict(yanchor="top", y=0.99, xanchor="left", x=0.01),
+        height=700
     )
-    st.plotly_chart(fig, use_container_width=True, height=700)
+    st.plotly_chart(fig, use_container_width=True)
 
 # ==========================================
-# 우측 화면 통계 및 개별 유저 검색창
+# 우측 화면: 탭으로 분리 (검색/상세 vs 통계/TOP10)
 # ==========================================
 with 우측_화면:
-    st.subheader("📊 탐지 통계")
-    
-    안전_수 = len(df[df['상태'] == '🔵 안전 (정상 패턴)'])
-    주의_수 = len(df[df['상태'] == '🟡 주의 (관찰 요망)'])
-    위험_수 = len(df[df['상태'] == '🔴 위험 (차단 대상)'])
-    
-    통계_좌, 통계_우 = st.columns(2)
-    with 통계_좌:
-        st.metric(label="전체 모니터링 대상", value=f"{len(df)} 명")
-        st.metric(label="🟡 주의 행동 감지", value=f"{주의_수} 건")
-    with 통계_우:
-        st.metric(label="🔴 위험 행동 감지", value=f"{위험_수} 건")
-        
-    st.markdown("---")
-    
-    st.subheader("🔍 개별 유저 상세 검색")
-    선택된_유저 = st.selectbox(
-        "유저 번호를 선택하거나 타이핑하여 검색하세요.",
-        options=["선택 안 함"] + list(df['유저 번호'].values),
-        index=0
-    )
-    
-    if 선택된_유저 != "선택 안 함":
-        유저_데이터 = df[df['유저 번호'] == 선택된_유저].iloc[0]
-        
-        with st.container(border=True):
-            st.markdown(f"### 👤 {선택된_유저} 프로필")
-            st.markdown(f"**현재 상태:** {유저_데이터['상태']}")
-            st.markdown(f"**위험도 점수:** `{유저_데이터['위험도 점수']}` / 100 점")
-            
-            if 유저_데이터['상태'] != '🔵 안전 (정상 패턴)':
-                st.markdown(f"⚠️ **주요 특이 원인:** <span style='color:#FF5722; font-weight:bold;'>{유저_데이터['주요원인_특성']}</span>", unsafe_allow_html=True)
-            
-            # 🎯 [버그 해결] on_click 콜백 함수 구조로 변경하여 생명주기 예외 완벽 회피
-            st.button(
-                "🎯 이 유저의 지표를 정상 기준으로 설정", 
-                use_container_width=True,
-                on_click=세션_기준값_업데이트,
-                args=(유저_데이터,)
-            )
+    탭_검색, 탭_통계 = st.tabs(["🔍 유저 상세 검색", "📊 통계 · TOP 10"])
 
-            st.markdown("**📋 상세 지표 현황**")
-            지표_데이터 = {}
-            for 특성, 기준 in zip(기본_특성, 설정_기준점):
-                값 = 유저_데이터[특성]
-                편차 = 값 - 기준
-                편차_문구 = f"+{편차:.1f}" if 편차 > 0 else f"{편차:.1f}"
-                지표_데이터[특성] = f"{값:.1f} (정상대비 {편차_문구})"
-            st.json(지표_데이터)
+    with 탭_검색:
+        유저_옵션 = ["선택 안 함"] + list(df['유저 번호'].values)
+        # [개선] key 부여로 재실행 간 선택 상태 유지. 단, 데이터가 재생성돼서
+        # 기존 선택값이 옵션에 없으면 안전하게 "선택 안 함"으로 되돌린다.
+        if st.session_state.get("selected_user_search") not in 유저_옵션:
+            st.session_state["selected_user_search"] = "선택 안 함"
 
-            st.markdown("---")
-            st.markdown("### 🤖 AI 판정 근거 분석")
-            contrib = {}
-            for 특성, sigma in zip(기본_특성, 정상_시그마):
-                값 = 유저_데이터[특성]
-                기준 = 설정_시리즈[특성]
-                z = abs((값-기준)/sigma)
-                contrib[특성]=z
-                if z>=3:
-                    st.error(f"{특성}: Z-score {z:.2f}")
-                elif z>=2:
-                    st.warning(f"{특성}: Z-score {z:.2f}")
-                else:
-                    st.success(f"{특성}: 정상 (Z-score {z:.2f})")
+        선택된_유저 = st.selectbox(
+            "유저 번호를 선택하거나 타이핑하여 검색하세요.",
+            options=유저_옵션,
+            key="selected_user_search"
+        )
 
-            st.markdown("### 📊 변수별 위험 기여도")
-            import plotly.express as px
-            import pandas as pd
-            s=pd.Series(contrib)
-            if s.sum()>0:
-                p=(s/s.sum()*100).sort_values(ascending=False)
-                fig2=px.bar(x=p.values,y=p.index,orientation='h',
-                            labels={'x':'기여도(%)','y':'변수'})
-                st.plotly_chart(fig2,use_container_width=True)
+        if 선택된_유저 != "선택 안 함":
+            유저_데이터 = df[df['유저 번호'] == 선택된_유저].iloc[0]
 
-                st.markdown("### 🧠 AI 종합 분석")
-                top=p.index[0]
-                txt=f"가장 큰 이상 원인은 **{top}**이며, "
-                if len(p[p>15])>1:
-                    txt+=f"{', '.join(list(p[p>15].index)[1:])}도 함께 위험도 증가에 영향을 주었습니다."
-                else:
-                    txt+="다른 변수들은 상대적으로 정상 범위에 가깝습니다."
-                st.info(txt)
+            with st.container(border=True):
+                st.markdown(f"### 👤 {선택된_유저} 프로필")
+                st.markdown(f"**현재 상태:** {유저_데이터['상태']}")
+                st.markdown(f"**위험도 점수:** `{유저_데이터['위험도 점수']}` / 100 점")
+                if 유저_데이터['상태'] != '🔵 안전 (정상 패턴)':
+                    st.markdown(f"⚠️ **주요 특이 원인:** <span style='color:#FF5722; font-weight:bold;'>{유저_데이터['주요원인_특성']}</span>", unsafe_allow_html=True)
 
-            
-    st.markdown("---")
-    st.write("**⚠️ 실시간 고위험 유저 (Top 10)**")
-    
-    보여줄_컬럼 = ['유저 번호', '상태', '위험도 점수'] + 기본_특성
-    st.dataframe(
-        df[df['상태'] == '🔴 위험 (차단 대상)'][보여줄_컬럼]
-        .sort_values(by='위험도 점수', ascending=False)
-        .head(10),
-        hide_index=True
-    )
+                st.button(
+                    "🎯 이 유저의 지표를 정상 기준으로 설정",
+                    use_container_width=True,
+                    on_click=세션_기준값_업데이트,
+                    args=(유저_데이터,)
+                )
+
+                # [개선] st.json 대신 표 형태로 지표 표시 (가독성 개선)
+                st.markdown("**📋 상세 지표 현황**")
+                지표_행 = []
+                z_행 = []
+                for 특성, 기준, sigma in zip(기본_특성, 설정_기준점, 정상_시그마):
+                    값 = 유저_데이터[특성]
+                    편차 = 값 - 기준
+                    z = abs(편차 / sigma)
+                    지표_행.append({
+                        "지표": 특성,
+                        "값": f"{값:.1f}",
+                        "기준대비": f"{'+' if 편차 > 0 else ''}{편차:.1f}",
+                        "Z-score": round(z, 2),
+                        "판정": "🔴 심각" if z >= 3 else ("🟡 주의" if z >= 2 else "🟢 정상")
+                    })
+                지표_표 = pd.DataFrame(지표_행)
+                st.dataframe(지표_표, hide_index=True, use_container_width=True)
+
+                # [개선] 위험 기여도 bar chart는 그대로 유지 (가벼운 연산)
+                기여도 = pd.Series({r["지표"]: r["Z-score"] for r in 지표_행})
+                if 기여도.sum() > 0:
+                    비율 = (기여도 / 기여도.sum() * 100).sort_values(ascending=False)
+                    fig2 = px.bar(x=비율.values, y=비율.index, orientation='h', labels={'x': '기여도(%)', 'y': '변수'})
+                    fig2.update_layout(height=220, margin=dict(l=0, r=0, t=10, b=0))
+                    st.plotly_chart(fig2, use_container_width=True)
+
+                    top = 비율.index[0]
+                    txt = f"가장 큰 이상 원인은 **{top}**이며, "
+                    if len(비율[비율 > 15]) > 1:
+                        txt += f"{', '.join(list(비율[비율 > 15].index)[1:])}도 함께 위험도 증가에 영향을 주었습니다."
+                    else:
+                        txt += "다른 변수들은 상대적으로 정상 범위에 가깝습니다."
+                    st.info(txt)
+        else:
+            st.caption("그래프를 참고해 유저 번호를 검색해보세요.")
+
+    with 탭_통계:
+        안전_수 = int((df['상태'] == '🔵 안전 (정상 패턴)').sum())
+        주의_수 = int((df['상태'] == '🟡 주의 (관찰 요망)').sum())
+        위험_수 = int((df['상태'] == '🔴 위험 (차단 대상)').sum())
+
+        통계_좌, 통계_우 = st.columns(2)
+        with 통계_좌:
+            st.metric(label="전체 모니터링 대상", value=f"{len(df)} 명")
+            st.metric(label="🟡 주의 행동 감지", value=f"{주의_수} 건")
+        with 통계_우:
+            st.metric(label="🔴 위험 행동 감지", value=f"{위험_수} 건")
+            st.metric(label="🔵 안전 유저", value=f"{안전_수} 명")
+
+        st.markdown("---")
+        st.write("**⚠️ 실시간 고위험 유저 (Top 10)**")
+        보여줄_컬럼 = ['유저 번호', '상태', '위험도 점수'] + 기본_특성
+        st.dataframe(
+            df[df['상태'] == '🔴 위험 (차단 대상)'][보여줄_컬럼]
+            .sort_values(by='위험도 점수', ascending=False)
+            .head(10),
+            hide_index=True,
+            use_container_width=True
+        )
