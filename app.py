@@ -104,12 +104,29 @@ if 데이터_소스 == "📂 내 파일 업로드 (CSV/Excel)":
             else:
                 user_df = pd.read_excel(업로드된_파일)
             
-            # 🚨 [초강력 방어 로직] 유령 문자 및 인코딩 깨짐으로 인한 컬럼 매칭 실패 원천 차단
-            user_df.columns = user_df.columns.str.strip()
-            for target in 기본_특성:
-                for col in user_df.columns:
-                    if target in col:  # 글자 뒤에 \r 이나 공백이 붙어있어도 감지해서 원본 컬럼명으로 치환
-                        user_df.rename(columns={col: target}, inplace=True)
+            # 🚨 [해결책 1] 눈에 안 보이는 인코딩 깨짐(BOM) 및 앞뒤 공백 완전 제거
+            user_df.columns = user_df.columns.str.replace('\ufeff', '').str.strip()
+            
+            # 🚨 [해결책 2] 사전(Dict) 매핑 방식으로 안전하고 확실하게 컬럼명 강제 매칭
+            치환_사전 = {}
+            for col in user_df.columns:
+                if '유저' in col or '번호' in col:
+                    치환_사전[col] = '유저 번호'
+                elif '체류' in col:
+                    치환_사전[col] = '체류시간'
+                elif '클릭' in col:
+                    치환_사전[col] = '클릭수'
+                elif '결제' in col:
+                    치환_사전[col] = '결제액'
+                elif '에러' in col:
+                    치환_사전[col] = '에러수'
+                elif '스크롤' in col or '깊이' in col:
+                    치환_사전[col] = '스크롤깊이'
+            
+            user_df.rename(columns=치환_사전, inplace=True)
+            
+            # 🚨 [해결책 3] Plotly 붕괴를 막기 위한 중복 컬럼 자동 제거 안전장치
+            user_df = user_df.loc[:, ~user_df.columns.duplicated()]
                 
             누락된_컬럼 = [col for col in 기본_특성 if col not in user_df.columns]
             if 누락된_컬럼:
@@ -202,6 +219,7 @@ if 주의_점수 >= 위험_점수:
 # 데이터 처리 시작
 # ==========================================
 df = base_df.copy()
+df = df.loc[:, ~df.columns.duplicated()] # 최종 데이터프레임 중복 컬럼 방어
 
 설정_기준점 = np.array([정상_체류, 정상_클릭, 정상_결제, 정상_에러, 정상_스크롤])
 z_scores = np.abs((df[기본_특성].values - 설정_기준점) / 정상_시그마)
@@ -278,7 +296,7 @@ with 좌측_화면:
             '🟡 주의 (관찰 요망)': 'rgba(255, 193, 7, 0.85)',
             '🔴 위험 (차단 대상)': 'rgba(255, 30, 30, 1.0)'
         },
-        size='마कर크기', size_max=15,
+        size='마커크기', size_max=15,
         custom_data=['유저 번호', '상태', '위험도 점수', '체류시간_표시', '클릭수_표시', '결제액_표시', '에러수_표시', '스크롤깊이_표시'],
         template='plotly_dark'
     )
