@@ -10,6 +10,5 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Ping Streamlit App
-        run: |
-          curl -s "https://sijiro-mhc8nhmtpkslflvqonvcmv.streamlit.app/" > /dev/null || true
-          echo "Ping sent to Streamlit App!"
+        continue-on-error: true
+        run: curl -s "https://sijiro-mhc8nhmtpkslflvqonvcmv.streamlit.app/"
