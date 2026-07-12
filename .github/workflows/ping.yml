@@ -10,5 +10,4 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Ping Streamlit App
-        continue-on-error: true
-        run: curl -s "https://sijiro-mhc8nhmtpkslflvqonvcmv.streamlit.app/"
+        run: curl -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0" -s "https://sijiro-mhc8nhmtpkslflvqonvcmv.streamlit.app/" > /dev/null
